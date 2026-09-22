@@ -1,26 +1,260 @@
 @import "tailwindcss";
 
+/* The theme is driven by a `dark` class on <html> so that CSS variables and
+   Tailwind's `dark:` utilities always agree, whether the class comes from the
+   system preference or from the manual toggle. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --color-brand-50: #eef4ff;
+  --color-brand-100: #dbe6fe;
+  --color-brand-200: #bfd3fe;
+  --color-brand-300: #93b4fd;
+  --color-brand-400: #608cfa;
+  --color-brand-500: #3b66f6;
+  --color-brand-600: #2547eb;
+  --color-brand-700: #1d35d8;
+  --color-brand-800: #1e2faf;
+  --color-brand-900: #1e2d8a;
+  --color-brand-950: #171d54;
+
+  --color-accent-400: #22d3ee;
+  --color-accent-500: #06b6d4;
+  --color-accent-600: #0891b2;
+
+  --color-surface: var(--surface);
+  --color-surface-muted: var(--surface-muted);
+  --color-surface-raised: var(--surface-raised);
+  --color-ink: var(--ink);
+  --color-ink-muted: var(--ink-muted);
+  --color-line: var(--line);
+
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+}
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --surface: #f6f8fc;
+  --surface-muted: #eef1f8;
+  --surface-raised: #ffffff;
+  --ink: #101828;
+  --ink-muted: #5b6478;
+  --line: #dfe4ee;
+  color-scheme: light;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+.dark {
+  --surface: #0b1020;
+  --surface-muted: #131a2e;
+  --surface-raised: #161e33;
+  --ink: #eef1f8;
+  --ink-muted: #9aa5bd;
+  --line: #26304a;
+  color-scheme: dark;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--surface);
+  color: var(--ink);
+}
+
+::selection {
+  background: var(--color-brand-200);
+  color: var(--color-brand-950);
+}
+
+@layer components {
+  .card {
+    background: var(--surface-raised);
+    border: 1px solid var(--line);
+    border-radius: 1rem;
+  }
+
+  .field {
+    display: block;
+    width: 100%;
+    border-radius: 0.625rem;
+    border: 1px solid var(--line);
+    background: var(--surface-raised);
+    color: var(--ink);
+    padding: 0.5rem 0.75rem;
+    font-size: 0.875rem;
+    line-height: 1.5rem;
+    outline: none;
+  }
+
+  .field:focus {
+    border-color: var(--color-brand-500);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-brand-500) 25%, transparent);
+  }
+
+  .field:disabled {
+    opacity: 0.6;
+  }
+
+  .label {
+    display: block;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--ink-muted);
+    margin-bottom: 0.3rem;
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    border-radius: 0.625rem;
+    padding: 0.55rem 1rem;
+    font-size: 0.875rem;
+    font-weight: 600;
+    border: 1px solid transparent;
+    cursor: pointer;
+    transition:
+      background-color 120ms ease,
+      border-color 120ms ease,
+      opacity 120ms ease;
+  }
+
+  .btn:disabled {
+    opacity: 0.6;
+    cursor: progress;
+  }
+
+  .btn-primary {
+    background: var(--color-brand-600);
+    color: #fff;
+  }
+
+  .btn-primary:hover:not(:disabled) {
+    background: var(--color-brand-700);
+  }
+
+  .btn-ghost {
+    background: transparent;
+    border-color: var(--line);
+    color: var(--ink);
+  }
+
+  .btn-ghost:hover:not(:disabled) {
+    background: var(--surface-muted);
+  }
+
+  .btn-danger {
+    background: transparent;
+    border-color: #f2b8b5;
+    color: #b42318;
+  }
+
+  .btn-danger:hover:not(:disabled) {
+    background: #fef3f2;
+  }
+
+  .dark .btn-danger {
+    border-color: #7a271a;
+    color: #fda29b;
+  }
+
+  .dark .btn-danger:hover:not(:disabled) {
+    background: #3a1210;
+  }
+
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    border-radius: 999px;
+    padding: 0.15rem 0.6rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    border: 1px solid var(--line);
+    background: var(--surface-muted);
+    color: var(--ink-muted);
+    white-space: nowrap;
+  }
+
+  .badge-success {
+    background: #ecfdf3;
+    border-color: #abefc6;
+    color: #067647;
+  }
+
+  .badge-danger {
+    background: #fef3f2;
+    border-color: #fecdca;
+    color: #b42318;
+  }
+
+  .badge-warning {
+    background: #fffaeb;
+    border-color: #fedf89;
+    color: #b54708;
+  }
+
+  .badge-info {
+    background: var(--color-brand-50);
+    border-color: var(--color-brand-200);
+    color: var(--color-brand-700);
+  }
+
+  .dark .badge-success {
+    background: #05301f;
+    border-color: #0b6b43;
+    color: #6ce9a6;
+  }
+
+  .dark .badge-danger {
+    background: #3a1210;
+    border-color: #7a271a;
+    color: #fda29b;
+  }
+
+  .dark .badge-warning {
+    background: #3a2a05;
+    border-color: #93370d;
+    color: #fec84b;
+  }
+
+  .dark .badge-info {
+    background: #16203f;
+    border-color: #2547eb;
+    color: #93b4fd;
+  }
+
+  .table-wrap {
+    overflow-x: auto;
+    border-radius: 1rem;
+    border: 1px solid var(--line);
+    background: var(--surface-raised);
+  }
+
+  .table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.875rem;
+  }
+
+  .table th {
+    text-align: left;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--ink-muted);
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--line);
+    white-space: nowrap;
+  }
+
+  .table td {
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--line);
+    vertical-align: middle;
+  }
+
+  .table tbody tr:last-child td {
+    border-bottom: none;
+  }
 }
