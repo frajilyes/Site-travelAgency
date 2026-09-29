@@ -1,36 +1,23 @@
 import 'server-only';
-import type { Document } from 'mongodb';
-import {
-  AS_ENTITY,
-  aircraftCol,
-  airlinesCol,
-  airportsCol,
-  countriesCol,
-  flightsCol,
-  fromDoc,
-  fromDocs,
-  literal,
-  nextId,
-  passengersCol,
-  startsWith,
-} from '../mongodb';
+import { AS_ENTITY, fromDoc, fromDocs, literal, pipeline, startsWith, type Doc, type Stage } from '../db';
+import { AircraftModel, AirlineModel, AirportModel, CountryModel } from '../models';
+import { FlightModel } from '../models/flights';
+import { PassengerModel } from '../models/bookings';
 import type { Aircraft, Airline, Airport, AirportWithCountry, Country } from '../types';
 
-/* ---------------------------------------------------------------- countries */
 
 export async function listCountries(): Promise<Country[]> {
-  const countries = await countriesCol();
-  return fromDocs<Country>(await countries.find().sort({ name: 1 }).toArray());
+  return fromDocs<Country>(await CountryModel.find().sort({ name: 1 }).lean<Doc<Country>[]>());
 }
 
 export async function getCountry(id: number): Promise<Country | undefined> {
-  const countries = await countriesCol();
-  return fromDoc<Country>(await countries.findOne({ _id: id }));
+  return fromDoc<Country>(await CountryModel.findOne({ _id: id }).lean<Doc<Country> | null>());
 }
 
 export async function getCountryByCode(code: string): Promise<Country | undefined> {
-  const countries = await countriesCol();
-  return fromDoc<Country>(await countries.findOne({ code: code.toUpperCase() }));
+  return fromDoc<Country>(
+    await CountryModel.findOne({ code: code.toUpperCase() }).lean<Doc<Country> | null>(),
+  );
 }
 
 export interface CountryInput {
@@ -43,28 +30,23 @@ export interface CountryInput {
 }
 
 export async function createCountry(input: CountryInput): Promise<number> {
-  const countries = await countriesCol();
-  const id = await nextId('countries');
-  await countries.insertOne({ _id: id, ...input });
-  return id;
+  const created = await CountryModel.create(input);
+  return created._id;
 }
 
 export async function updateCountry(id: number, input: CountryInput): Promise<void> {
-  const countries = await countriesCol();
-  await countries.updateOne({ _id: id }, { $set: input });
+  await CountryModel.updateOne({ _id: id }, { $set: input });
 }
 
 export async function deleteCountry(id: number): Promise<void> {
-  const countries = await countriesCol();
-  await countries.deleteOne({ _id: id });
+  await CountryModel.deleteOne({ _id: id });
 }
 
-/** Documents that would break if the country disappeared — the old RESTRICT. */
 export async function countryUsage(id: number): Promise<number> {
   const [airports, airlines, passengers] = await Promise.all([
-    (await airportsCol()).countDocuments({ country_id: id }),
-    (await airlinesCol()).countDocuments({ country_id: id }),
-    (await passengersCol()).countDocuments({ nationality_id: id }),
+    AirportModel.countDocuments({ country_id: id }),
+    AirlineModel.countDocuments({ country_id: id }),
+    PassengerModel.countDocuments({ nationality_id: id }),
   ]);
   return airports + airlines + passengers;
 }
@@ -78,18 +60,16 @@ export interface DestinationCountry {
   cities: string;
 }
 
-/** Countries that have at least one airport, grouped by continent. */
 export async function destinationCountries(): Promise<DestinationCountry[]> {
-  const countries = await countriesCol();
-  const rows = await countries
-    .aggregate<{
-      _id: number;
-      name: string;
-      continent: string;
-      code: string;
-      airports: number;
-      cities: string[];
-    }>([
+  const rows = await CountryModel.aggregate<{
+    _id: number;
+    name: string;
+    continent: string;
+    code: string;
+    airports: number;
+    cities: string[];
+  }>(
+    pipeline([
       {
         $lookup: {
           from: 'airports',
@@ -109,21 +89,18 @@ export async function destinationCountries(): Promise<DestinationCountry[]> {
         },
       },
       { $sort: { continent: 1, name: 1 } },
-    ])
-    .toArray();
+    ]),
+  );
 
   return rows.map(({ _id, cities, ...rest }) => ({
     id: _id,
     ...rest,
-    // The old query used GROUP_CONCAT(DISTINCT …); callers still split on commas.
     cities: [...new Set(cities)].join(','),
   }));
 }
 
-/* ----------------------------------------------------------------- airports */
 
-/** Joins each airport to its country, replacing the old `JOIN countries`. */
-const AIRPORT_WITH_COUNTRY: Document[] = [
+const AIRPORT_WITH_COUNTRY: Stage[] = [
   { $lookup: { from: 'countries', localField: 'country_id', foreignField: '_id', as: 'country' } },
   { $unwind: '$country' },
   { $set: { country_name: '$country.name', country_code: '$country.code' } },
@@ -131,13 +108,12 @@ const AIRPORT_WITH_COUNTRY: Document[] = [
 ];
 
 async function airportsWithCountry(
-  stages: Document[] = [],
-  tail: Document[] = [],
+  stages: Stage[] = [],
+  tail: Stage[] = [],
 ): Promise<AirportWithCountry[]> {
-  const airports = await airportsCol();
-  return airports
-    .aggregate<AirportWithCountry>([...stages, ...AIRPORT_WITH_COUNTRY, ...tail, ...AS_ENTITY])
-    .toArray();
+  return AirportModel.aggregate<AirportWithCountry>(
+    pipeline([...stages, ...AIRPORT_WITH_COUNTRY, ...tail, ...AS_ENTITY]),
+  );
 }
 
 export async function listAirports(): Promise<AirportWithCountry[]> {
@@ -154,7 +130,6 @@ export async function getAirportByIata(iata: string): Promise<AirportWithCountry
   return airport;
 }
 
-/** Airport lookup used by the search form's autocomplete. */
 export async function searchAirports(term: string, limit = 8): Promise<AirportWithCountry[]> {
   const like = literal(term);
   return airportsWithCountry(
@@ -166,7 +141,6 @@ export async function searchAirports(term: string, limit = 8): Promise<AirportWi
         },
       },
       {
-        // Exact IATA code first, then a city that starts with the term.
         $set: {
           rank: {
             $switch: {
@@ -198,28 +172,22 @@ export interface AirportInput {
 }
 
 export async function createAirport(input: AirportInput): Promise<number> {
-  const airports = await airportsCol();
-  const id = await nextId('airports');
-  await airports.insertOne({ _id: id, ...input });
-  return id;
+  const created = await AirportModel.create(input);
+  return created._id;
 }
 
 export async function updateAirport(id: number, input: AirportInput): Promise<void> {
-  const airports = await airportsCol();
-  await airports.updateOne({ _id: id }, { $set: input });
+  await AirportModel.updateOne({ _id: id }, { $set: input });
 }
 
 export async function deleteAirport(id: number): Promise<void> {
-  const airports = await airportsCol();
-  await airports.deleteOne({ _id: id });
+  await AirportModel.deleteOne({ _id: id });
 }
 
 export async function airportUsage(id: number): Promise<number> {
-  const flights = await flightsCol();
-  return flights.countDocuments({ $or: [{ origin_id: id }, { destination_id: id }] });
+  return FlightModel.countDocuments({ $or: [{ origin_id: id }, { destination_id: id }] });
 }
 
-/* ----------------------------------------------------------------- airlines */
 
 export interface AirlineWithCountry extends Airline {
   country_name: string;
@@ -227,24 +195,20 @@ export interface AirlineWithCountry extends Airline {
 }
 
 export async function listAirlines(): Promise<AirlineWithCountry[]> {
-  const [airlines, flights] = await Promise.all([airlinesCol(), flightsCol()]);
-
-  // One grouped pass over the flights index beats a per-airline `$lookup`
-  // count, which re-scans the collection once for every carrier.
   const [rows, operated] = await Promise.all([
-    airlines
-      .aggregate<Omit<AirlineWithCountry, 'flights'>>([
-        {
-          $lookup: { from: 'countries', localField: 'country_id', foreignField: '_id', as: 'country' },
-        },
+    AirlineModel.aggregate<Omit<AirlineWithCountry, 'flights'>>(
+      pipeline([
+        { $lookup: { from: 'countries', localField: 'country_id', foreignField: '_id', as: 'country' } },
         { $unwind: '$country' },
         { $set: { country_name: '$country.name' } },
         { $unset: 'country' },
         { $sort: { name: 1 } },
         ...AS_ENTITY,
-      ])
-      .toArray(),
-    flights.aggregate<{ _id: number; n: number }>([{ $group: { _id: '$airline_id', n: { $sum: 1 } } }]).toArray(),
+      ]),
+    ),
+    FlightModel.aggregate<{ _id: number; n: number }>(
+      pipeline([{ $group: { _id: '$airline_id', n: { $sum: 1 } } }]),
+    ),
   ]);
 
   const counts = new Map(operated.map((row) => [row._id, row.n]));
@@ -252,13 +216,13 @@ export async function listAirlines(): Promise<AirlineWithCountry[]> {
 }
 
 export async function listActiveAirlines(): Promise<Airline[]> {
-  const airlines = await airlinesCol();
-  return fromDocs<Airline>(await airlines.find({ active: 1 }).sort({ name: 1 }).toArray());
+  return fromDocs<Airline>(
+    await AirlineModel.find({ active: 1 }).sort({ name: 1 }).lean<Doc<Airline>[]>(),
+  );
 }
 
 export async function getAirline(id: number): Promise<Airline | undefined> {
-  const airlines = await airlinesCol();
-  return fromDoc<Airline>(await airlines.findOne({ _id: id }));
+  return fromDoc<Airline>(await AirlineModel.findOne({ _id: id }).lean<Doc<Airline> | null>());
 }
 
 export interface AirlineInput {
@@ -270,37 +234,31 @@ export interface AirlineInput {
 }
 
 export async function createAirline(input: AirlineInput): Promise<number> {
-  const airlines = await airlinesCol();
-  const id = await nextId('airlines');
-  await airlines.insertOne({ _id: id, ...input });
-  return id;
+  const created = await AirlineModel.create(input);
+  return created._id;
 }
 
 export async function updateAirline(id: number, input: AirlineInput): Promise<void> {
-  const airlines = await airlinesCol();
-  await airlines.updateOne({ _id: id }, { $set: input });
+  await AirlineModel.updateOne({ _id: id }, { $set: input });
 }
 
 export async function deleteAirline(id: number): Promise<void> {
-  const airlines = await airlinesCol();
-  await airlines.deleteOne({ _id: id });
+  await AirlineModel.deleteOne({ _id: id });
 }
 
 export async function airlineUsage(id: number): Promise<number> {
-  const flights = await flightsCol();
-  return flights.countDocuments({ airline_id: id });
+  return FlightModel.countDocuments({ airline_id: id });
 }
 
-/* ----------------------------------------------------------------- aircraft */
 
 export async function listAircraft(): Promise<Aircraft[]> {
-  const aircraft = await aircraftCol();
-  return fromDocs<Aircraft>(await aircraft.find().sort({ manufacturer: 1, model: 1 }).toArray());
+  return fromDocs<Aircraft>(
+    await AircraftModel.find().sort({ manufacturer: 1, model: 1 }).lean<Doc<Aircraft>[]>(),
+  );
 }
 
 export async function getAircraft(id: number): Promise<Aircraft | undefined> {
-  const aircraft = await aircraftCol();
-  return fromDoc<Aircraft>(await aircraft.findOne({ _id: id }));
+  return fromDoc<Aircraft>(await AircraftModel.findOne({ _id: id }).lean<Doc<Aircraft> | null>());
 }
 
 export interface AircraftInput {
@@ -315,25 +273,20 @@ export interface AircraftInput {
 }
 
 export async function createAircraft(input: AircraftInput): Promise<number> {
-  const aircraft = await aircraftCol();
-  const id = await nextId('aircraft');
-  await aircraft.insertOne({ _id: id, ...input });
-  return id;
+  const created = await AircraftModel.create(input);
+  return created._id;
 }
 
 export async function updateAircraft(id: number, input: AircraftInput): Promise<void> {
-  const aircraft = await aircraftCol();
-  await aircraft.updateOne({ _id: id }, { $set: input });
+  await AircraftModel.updateOne({ _id: id }, { $set: input });
 }
 
 export async function deleteAircraft(id: number): Promise<void> {
-  const aircraft = await aircraftCol();
-  await aircraft.deleteOne({ _id: id });
+  await AircraftModel.deleteOne({ _id: id });
 }
 
 export async function aircraftUsage(id: number): Promise<number> {
-  const flights = await flightsCol();
-  return flights.countDocuments({ aircraft_id: id });
+  return FlightModel.countDocuments({ aircraft_id: id });
 }
 
 export type { Airport, Country, Aircraft, Airline };

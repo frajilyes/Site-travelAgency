@@ -1,6 +1,5 @@
 import * as z from 'zod';
 
-/** Shape returned by every Server Action so forms can render field errors. */
 export interface ActionState {
   errors?: Record<string, string[]>;
   message?: string;
@@ -10,88 +9,124 @@ export interface ActionState {
 const name = z
   .string()
   .trim()
-  .min(2, 'Au moins 2 caractères.')
-  .max(60, 'Au plus 60 caractères.');
+  .min(2, 'At least 2 characters.')
+  .max(60, 'At most 60 characters.');
+
+const email = z.email('Invalid email address.').trim().toLowerCase().max(254);
+
+const WEAK_PASSWORDS = new Set([
+  'password', 'motdepasse', '123456789', '123456789a', 'azertyuiop', 'qwertyuiop',
+  'password1', 'motdepasse1', 'admin1234', 'administrateur', 'iloveyou1',
+  'skyroute', 'skyroute1', 'admin@2026', 'client@2026', 'azerty123', 'qwerty123',
+  'bonjour123', 'soleil123', 'passw0rd', 'p@ssw0rd', 'welcome123', 'changeme123',
+]);
 
 const password = z
   .string()
-  .min(8, 'Au moins 8 caractères.')
-  .regex(/[a-zA-Z]/, 'Doit contenir une lettre.')
-  .regex(/[0-9]/, 'Doit contenir un chiffre.');
+  .min(12, 'At least 12 characters.')
+  .max(128, 'At most 128 characters.')
+  .regex(/[a-z]/, 'Must contain a lowercase letter.')
+  .regex(/[A-Z]/, 'Must contain an uppercase letter.')
+  .regex(/[0-9]/, 'Must contain a digit.')
+  .refine((value) => value.trim() === value, 'Cannot start or end with a space.')
+  .refine(
+    (value) => !WEAK_PASSWORDS.has(value.toLowerCase()),
+    'This password is too common — choose another one.',
+  )
+  .refine((value) => new Set(value).size >= 5, 'This password is too repetitive.');
+
+function unrelatedToEmail(data: { email: string; password: string }): boolean {
+  const local = data.email.split('@')[0]?.toLowerCase() ?? '';
+  return local.length < 3 || !data.password.toLowerCase().includes(local);
+}
+
+export const IdSchema = z.coerce.number().int().positive().max(Number.MAX_SAFE_INTEGER);
+
+export const SearchSchema = z.string().trim().max(64);
 
 const phone = z
   .string()
   .trim()
-  .min(6, 'Numéro trop court.')
-  .max(25, 'Numéro trop long.')
-  .regex(/^[+0-9 ().-]+$/, 'Numéro invalide.');
+  .min(6, 'Number too short.')
+  .max(25, 'Number too long.')
+  .regex(/^[+0-9 ().-]+$/, 'Invalid number.');
 
 export const RegisterSchema = z
   .object({
     first_name: name,
     last_name: name,
-    email: z.email('Adresse e-mail invalide.').trim().toLowerCase(),
+    email,
     phone: phone.optional().or(z.literal('')),
     password,
-    confirm: z.string(),
+    confirm: z.string().max(128),
   })
   .refine((data) => data.password === data.confirm, {
     path: ['confirm'],
-    message: 'Les mots de passe ne correspondent pas.',
+    message: 'Passwords do not match.',
+  })
+  .refine(unrelatedToEmail, {
+    path: ['password'],
+    message: 'The password must not repeat your email address.',
   });
 
 export const LoginSchema = z.object({
-  email: z.email('Adresse e-mail invalide.').trim().toLowerCase(),
-  password: z.string().min(1, 'Mot de passe requis.'),
+  email,
+  password: z.string().min(1, 'Password required.').max(128),
 });
 
 export const ProfileSchema = z.object({
   first_name: name,
   last_name: name,
-  email: z.email('Adresse e-mail invalide.').trim().toLowerCase(),
+  email,
   phone: phone.optional().or(z.literal('')),
 });
 
 export const PasswordChangeSchema = z
   .object({
-    current: z.string().min(1, 'Mot de passe actuel requis.'),
+    current: z.string().min(1, 'Current password required.').max(128),
     password,
-    confirm: z.string(),
+    confirm: z.string().max(128),
   })
   .refine((data) => data.password === data.confirm, {
     path: ['confirm'],
-    message: 'Les mots de passe ne correspondent pas.',
+    message: 'Passwords do not match.',
+  })
+  .refine((data) => data.password !== data.current, {
+    path: ['password'],
+    message: 'The new password must be different from the old one.',
   });
 
-const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date invalide (AAAA-MM-JJ).');
+const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Invalid date (YYYY-MM-DD).');
 
 export const PassengerSchema = z.object({
   first_name: name,
   last_name: name,
   date_of_birth: isoDate,
   gender: z.enum(['M', 'F', 'X']),
-  nationality_id: z.coerce.number().int().positive('Nationalité requise.'),
+  nationality_id: z.coerce.number().int().positive('Nationality required.'),
   passport_number: z
     .string()
     .trim()
-    .min(5, 'Numéro de passeport trop court.')
-    .max(20, 'Numéro de passeport trop long.'),
+    .toUpperCase()
+    .min(5, 'Passport number too short.')
+    .max(20, 'Passport number too long.')
+    .regex(/^[A-Z0-9]+$/, 'Invalid passport number (letters and digits only).'),
   passport_expiry: isoDate,
   passenger_type: z.enum(['adult', 'child', 'infant']),
 });
 
 export const BookingSchema = z.object({
-  outbound_flight_id: z.coerce.number().int().positive(),
-  return_flight_id: z.coerce.number().int().positive().nullable(),
+  outbound_flight_id: IdSchema,
+  return_flight_id: IdSchema.nullable(),
   cabin: z.enum(['economy', 'business', 'first']),
-  contact_email: z.email('Adresse e-mail de contact invalide.').trim().toLowerCase(),
+  contact_email: email,
   contact_phone: phone,
   payment_method: z.enum(['card', 'paypal', 'bank_transfer']),
-  card_number: z.string().optional(),
-  card_holder: z.string().optional(),
-  card_expiry: z.string().optional(),
-  card_cvc: z.string().optional(),
-  accept_terms: z.literal('on', { error: 'Vous devez accepter les conditions de vente.' }),
+  card_number: z.string().trim().max(25).optional(),
+  card_holder: z.string().trim().max(60).optional(),
+  card_expiry: z.string().trim().max(7).optional(),
+  card_cvc: z.string().trim().max(4).optional(),
+  accept_terms: z.literal('on', { error: 'You must accept the terms of sale.' }),
 });
 
 export const CountrySchema = z.object({
@@ -99,18 +134,18 @@ export const CountrySchema = z.object({
     .string()
     .trim()
     .toUpperCase()
-    .regex(/^[A-Z]{2}$/, 'Code ISO à 2 lettres.'),
+    .regex(/^[A-Z]{2}$/, '2-letter ISO code.'),
   name: name,
-  continent: z.string().trim().min(2, 'Continent requis.'),
+  continent: z.string().trim().min(2, 'Continent required.').max(40),
   currency: z
     .string()
     .trim()
     .toUpperCase()
-    .regex(/^[A-Z]{3}$/, 'Code devise à 3 lettres.'),
+    .regex(/^[A-Z]{3}$/, '3-letter currency code.'),
   phone_code: z
     .string()
     .trim()
-    .regex(/^\+\d{1,4}$/, 'Indicatif au format +33.'),
+    .regex(/^\+\d{1,4}$/, 'Dialling code in +33 format.'),
   visa_note: z.string().trim().max(300).optional().or(z.literal('')),
 });
 
@@ -119,18 +154,23 @@ export const AirportSchema = z.object({
     .string()
     .trim()
     .toUpperCase()
-    .regex(/^[A-Z]{3}$/, 'Code IATA à 3 lettres.'),
+    .regex(/^[A-Z]{3}$/, '3-letter IATA code.'),
   icao: z
     .string()
     .trim()
     .toUpperCase()
-    .regex(/^[A-Z]{4}$/, 'Code OACI à 4 lettres.')
+    .regex(/^[A-Z]{4}$/, '4-letter ICAO code.')
     .optional()
     .or(z.literal('')),
-  name: z.string().trim().min(3, 'Nom requis.'),
-  city: z.string().trim().min(2, 'Ville requise.'),
-  country_id: z.coerce.number().int().positive('Pays requis.'),
-  timezone: z.string().trim().min(3, 'Fuseau horaire requis (ex. Europe/Paris).'),
+  name: z.string().trim().min(3, 'Name required.').max(80),
+  city: z.string().trim().min(2, 'City required.').max(60),
+  country_id: IdSchema,
+  timezone: z
+    .string()
+    .trim()
+    .min(3, 'Timezone required (e.g. Europe/Paris).')
+    .max(64)
+    .regex(/^[A-Za-z0-9+_-]+(?:\/[A-Za-z0-9+_-]+){0,2}$/, 'Invalid timezone.'),
   latitude: z.coerce.number().min(-90).max(90),
   longitude: z.coerce.number().min(-180).max(180),
 });
@@ -140,17 +180,17 @@ export const AirlineSchema = z.object({
     .string()
     .trim()
     .toUpperCase()
-    .regex(/^[A-Z0-9]{2}$/, 'Code IATA à 2 caractères.'),
-  name: z.string().trim().min(2, 'Nom requis.'),
-  country_id: z.coerce.number().int().positive('Pays requis.'),
+    .regex(/^[A-Z0-9]{2}$/, '2-character IATA code.'),
+  name: z.string().trim().min(2, 'Name required.').max(80),
+  country_id: z.coerce.number().int().positive('Country required.'),
   alliance: z.string().trim().max(40).optional().or(z.literal('')),
   active: z.coerce.boolean(),
 });
 
 export const AircraftSchema = z.object({
-  code: z.string().trim().toUpperCase().min(2, 'Code requis.').max(8),
-  model: z.string().trim().min(2, 'Modèle requis.'),
-  manufacturer: z.string().trim().min(2, 'Constructeur requis.'),
+  code: z.string().trim().toUpperCase().min(2, 'Code required.').max(8),
+  model: z.string().trim().min(2, 'Model required.').max(60),
+  manufacturer: z.string().trim().min(2, 'Manufacturer required.').max(60),
   capacity_economy: z.coerce.number().int().min(0).max(900),
   capacity_business: z.coerce.number().int().min(0).max(300),
   capacity_first: z.coerce.number().int().min(0).max(100),
@@ -160,18 +200,18 @@ export const AircraftSchema = z.object({
 
 const localDateTime = z
   .string()
-  .regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/, 'Date et heure invalides.');
+  .regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/, 'Invalid date and time.');
 
 export const FlightSchema = z.object({
   flight_number: z
     .string()
     .trim()
     .toUpperCase()
-    .regex(/^[A-Z0-9]{2}\d{1,4}$/, 'Numéro de vol invalide (ex. AF1234).'),
-  airline_id: z.coerce.number().int().positive('Compagnie requise.'),
-  aircraft_id: z.coerce.number().int().positive('Appareil requis.'),
-  origin_id: z.coerce.number().int().positive('Aéroport de départ requis.'),
-  destination_id: z.coerce.number().int().positive("Aéroport d'arrivée requis."),
+    .regex(/^[A-Z0-9]{2}\d{1,4}$/, 'Invalid flight number (e.g. AF1234).'),
+  airline_id: z.coerce.number().int().positive('Airline required.'),
+  aircraft_id: z.coerce.number().int().positive('Aircraft required.'),
+  origin_id: z.coerce.number().int().positive('Origin airport required.'),
+  destination_id: z.coerce.number().int().positive('Destination airport required.'),
   departure_time: localDateTime,
   price_economy: z.coerce.number().min(0).max(100000),
   price_business: z.coerce.number().min(0).max(200000),
@@ -186,15 +226,27 @@ export const FlightSchema = z.object({
 export const AdminUserSchema = z.object({
   first_name: name,
   last_name: name,
-  email: z.email('Adresse e-mail invalide.').trim().toLowerCase(),
+  email,
   phone: phone.optional().or(z.literal('')),
   role: z.enum(['user', 'admin']),
   status: z.enum(['active', 'suspended']),
 });
 
-export const AdminUserCreateSchema = AdminUserSchema.extend({ password });
+export const AdminUserCreateSchema = AdminUserSchema.extend({ password }).refine(
+  unrelatedToEmail,
+  { path: ['password'], message: 'The password must not repeat the email address.' },
+);
 
-/** Collapse a Zod error into the `{ field: [messages] }` shape forms expect. */
+export const FlightStatusSchema = z.enum([
+  'scheduled',
+  'delayed',
+  'cancelled',
+  'departed',
+  'landed',
+]);
+
+export const BookingStatusSchema = z.enum(['pending', 'confirmed', 'completed']);
+
 export function fieldErrors(error: z.ZodError): Record<string, string[]> {
   const out: Record<string, string[]> = {};
   for (const issue of error.issues) {

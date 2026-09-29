@@ -4,7 +4,6 @@ import { CABIN_LABELS } from '@/lib/types';
 import { formatDuration, formatPrice, formatTime, priceForClass, seatsForClass } from '@/lib/format';
 import { FlightBadge } from './ui';
 
-/** The visual timeline shared by the search results and the flight detail page. */
 export function FlightTimeline({ flight }: { flight: FlightDetail }) {
   const dayShift =
     flight.arrival_time.slice(0, 10) !== flight.departure_time.slice(0, 10)
@@ -49,7 +48,7 @@ export function FlightCard({
   passengers,
   href,
   selected = false,
-  actionLabel = 'Sélectionner',
+  actionLabel = 'Select',
 }: {
   flight: FlightDetail;
   cabin: CabinClass;
@@ -74,7 +73,7 @@ export function FlightCard({
           {flight.aircraft_manufacturer} {flight.aircraft_model}
         </span>
         <FlightBadge status={flight.status} />
-        {selected ? <span className="badge badge-success">Sélectionné</span> : null}
+        {selected ? <span className="badge badge-success">Selected</span> : null}
       </div>
 
       <div className="mt-4 grid gap-4 lg:grid-cols-[1fr_auto] lg:items-center">
@@ -91,10 +90,9 @@ export function FlightCard({
             <p className="text-xs text-ink-muted">{CABIN_LABELS[cabin]}</p>
             <p className="text-2xl font-bold">{formatPrice(unitPrice)}</p>
             <p className="text-xs text-ink-muted">
-              par adulte · {seatsLeft} place{seatsLeft > 1 ? 's' : ''} restante
-              {seatsLeft > 1 ? 's' : ''}
+              per adult · {seatsLeft} seat{seatsLeft > 1 ? 's' : ''} left
             </p>
-            <p className="text-xs text-ink-muted">Bagage en soute {flight.baggage_kg} kg</p>
+            <p className="text-xs text-ink-muted">Checked baggage {flight.baggage_kg} kg</p>
           </div>
 
           {seatsLeft >= passengers ? (
@@ -102,7 +100,7 @@ export function FlightCard({
               {actionLabel}
             </Link>
           ) : (
-            <span className="badge badge-danger">Complet pour {passengers} passagers</span>
+            <span className="badge badge-danger">Full for {passengers} passengers</span>
           )}
         </div>
       </div>

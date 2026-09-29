@@ -21,15 +21,11 @@ function Submit({
   );
 }
 
-/**
- * A single-button form bound to a Server Action, with an optional confirmation
- * dialog and inline feedback. Used for cancellations and admin deletions.
- */
 export function ActionButton({
   action,
   fields,
   label,
-  pendingLabel = 'En cours…',
+  pendingLabel = 'Working…',
   confirmText,
   variant = 'ghost',
 }: {
@@ -66,7 +62,6 @@ export function ActionButton({
   );
 }
 
-/** A `<select>` that submits the chosen value to a Server Action on change. */
 export function StatusSelect({
   action,
   fields,
@@ -92,7 +87,7 @@ export function StatusSelect({
         defaultValue={value}
         className="field py-1 text-xs"
         onChange={(event) => event.currentTarget.form?.requestSubmit()}
-        aria-label="Changer le statut"
+        aria-label="Change status"
       >
         {options.map((option) => (
           <option key={option.value} value={option.value}>

@@ -6,23 +6,23 @@ import { formatPrice } from '@/lib/format';
 
 const ADVANTAGES = [
   {
-    title: 'Tarifs calculés en direct',
-    text: "Les prix évoluent selon la distance, la date et les places restantes — exactement comme chez les compagnies.",
+    title: 'Fares priced live',
+    text: 'Prices move with distance, travel date and remaining seats — exactly as they do at the airlines.',
     icon: '💶',
   },
   {
-    title: 'Sièges attribués à la réservation',
-    text: 'Chaque passager reçoit un numéro de siège et un billet électronique consultable à tout moment.',
+    title: 'Seats assigned at booking',
+    text: 'Every passenger gets a seat number and an e-ticket they can pull up at any time.',
     icon: '🎫',
   },
   {
-    title: 'Annulation transparente',
-    text: 'Remboursement intégral jusqu’à 7 jours avant le départ, 50 % ensuite, avec remise en vente des sièges.',
+    title: 'Transparent cancellation',
+    text: 'Full refund up to 7 days before departure, 50% after that, with the seats put back on sale.',
     icon: '🔄',
   },
   {
-    title: 'Formalités par pays',
-    text: 'Visa, monnaie, indicatif téléphonique et fuseau horaire sont indiqués pour chaque destination.',
+    title: 'Entry requirements by country',
+    text: 'Visa rules, currency, dialling code and timezone are listed for every destination.',
     icon: '🛂',
   },
 ];
@@ -40,14 +40,14 @@ export default async function HomePage() {
         <div className="mx-auto max-w-7xl px-4 py-14 sm:py-20">
           <div className="max-w-2xl text-white">
             <p className="inline-flex rounded-full bg-white/15 px-3 py-1 text-xs font-semibold uppercase tracking-wide">
-              {counts.upcoming.toLocaleString('fr-FR')} vols à réserver
+              {counts.upcoming.toLocaleString('en-GB')} flights to book
             </p>
             <h1 className="mt-4 text-4xl font-bold tracking-tight sm:text-5xl">
-              Le monde entier, en un vol
+              The whole world, one flight away
             </h1>
             <p className="mt-4 text-base text-white/85 sm:text-lg">
-              Comparez les vols de 27 compagnies vers 35 pays, réservez pour toute la famille et
-              gérez vos billets depuis votre espace personnel.
+              Compare flights from 27 airlines to 35 countries, book for the whole family and manage
+              your tickets from your own account.
             </p>
           </div>
 
@@ -72,13 +72,13 @@ export default async function HomePage() {
       <section className="mx-auto max-w-7xl px-4 py-12">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
-            <h2 className="text-2xl font-bold tracking-tight">Au départ de Paris</h2>
+            <h2 className="text-2xl font-bold tracking-tight">Departing from Paris</h2>
             <p className="mt-1 text-sm text-ink-muted">
-              Les tarifs aller simple les plus bas actuellement disponibles en classe économique.
+              The lowest one-way fares currently available in economy class.
             </p>
           </div>
           <Link href="/destinations" className="btn btn-ghost">
-            Toutes les destinations
+            All destinations
           </Link>
         </div>
 
@@ -86,7 +86,7 @@ export default async function HomePage() {
           {destinations.map((destination) => (
             <Link
               key={destination.destination_id}
-              href={`/vols?from=CDG&to=${destination.iata}&date=${new Date().toISOString().slice(0, 10)}&cabine=economy&adultes=1&enfants=0&bebes=0`}
+              href={`/flights?from=CDG&to=${destination.iata}&date=${new Date().toISOString().slice(0, 10)}&cabin=economy&adults=1&children=0&infants=0`}
               className="card group flex flex-col justify-between p-5 transition-colors hover:border-brand-400"
             >
               <div>
@@ -99,16 +99,16 @@ export default async function HomePage() {
                 <p className="font-mono text-xs text-ink-muted">CDG → {destination.iata}</p>
               </div>
               <p className="mt-4 text-sm text-ink-muted">
-                dès <span className="text-base font-bold text-ink">{formatPrice(destination.price)}</span>
+                from <span className="text-base font-bold text-ink">{formatPrice(destination.price)}</span>
               </p>
             </Link>
           ))}
         </div>
       </section>
 
-      <section className="border-t border-line bg-surface-muted">
+      <section className="below-fold border-t border-line bg-surface-muted">
         <div className="mx-auto max-w-7xl px-4 py-12">
-          <h2 className="text-2xl font-bold tracking-tight">Une agence complète, pas une vitrine</h2>
+          <h2 className="text-2xl font-bold tracking-tight">A full agency, not a shop window</h2>
           <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             {ADVANTAGES.map((advantage) => (
               <div key={advantage.title} className="card p-5">
@@ -123,23 +123,23 @@ export default async function HomePage() {
         </div>
       </section>
 
-      <section className="mx-auto max-w-7xl px-4 py-12">
+      <section className="below-fold mx-auto max-w-7xl px-4 py-12">
         <div className="card grid gap-6 p-6 sm:grid-cols-2 lg:grid-cols-4">
           <div>
-            <p className="text-3xl font-bold tabular-nums">{counts.total.toLocaleString('fr-FR')}</p>
-            <p className="text-sm text-ink-muted">vols programmés</p>
+            <p className="text-3xl font-bold tabular-nums">{counts.total.toLocaleString('en-GB')}</p>
+            <p className="text-sm text-ink-muted">scheduled flights</p>
           </div>
           <div>
             <p className="text-3xl font-bold tabular-nums">55</p>
-            <p className="text-sm text-ink-muted">aéroports desservis</p>
+            <p className="text-sm text-ink-muted">airports served</p>
           </div>
           <div>
             <p className="text-3xl font-bold tabular-nums">27</p>
-            <p className="text-sm text-ink-muted">compagnies partenaires</p>
+            <p className="text-sm text-ink-muted">partner airlines</p>
           </div>
           <div>
             <p className="text-3xl font-bold tabular-nums">35</p>
-            <p className="text-sm text-ink-muted">pays accessibles</p>
+            <p className="text-sm text-ink-muted">countries reachable</p>
           </div>
         </div>
       </section>

@@ -5,7 +5,7 @@ import { destinationCountries } from '@/lib/queries/reference';
 export const metadata: Metadata = {
   title: 'Destinations',
   description:
-    'Tous les pays desservis par SkyRoute, avec leurs aéroports, leur monnaie et les formalités d’entrée.',
+    'Every country SkyRoute serves, with its airports, currency and entry requirements.',
 };
 
 export default async function DestinationsPage() {
@@ -14,11 +14,11 @@ export default async function DestinationsPage() {
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-10">
-      <h1 className="text-2xl font-bold tracking-tight">Nos destinations</h1>
+      <h1 className="text-2xl font-bold tracking-tight">Our destinations</h1>
       <p className="mt-1 text-sm text-ink-muted">
-        {countries.length} pays desservis, {countries.reduce((sum, c) => sum + c.airports, 0)}{' '}
-        aéroports. Chaque fiche pays indique la monnaie, l’indicatif téléphonique et les formalités
-        d’entrée.
+        {countries.length} countries served, {countries.reduce((sum, c) => sum + c.airports, 0)}{' '}
+        airports. Each country page lists the currency, the dialling code and the entry
+        requirements.
       </p>
 
       <div className="mt-8 space-y-10">
@@ -39,7 +39,7 @@ export default async function DestinationsPage() {
                       <span className="badge">{country.code}</span>
                     </p>
                     <p className="mt-2 text-xs text-ink-muted">
-                      {country.airports} aéroport{country.airports > 1 ? 's' : ''} ·{' '}
+                      {country.airports} airport{country.airports > 1 ? 's' : ''} ·{' '}
                       {country.cities.split(',').slice(0, 3).join(', ')}
                     </p>
                   </Link>

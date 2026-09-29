@@ -4,6 +4,7 @@ import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 import { after } from 'next/server';
 import { requireUser } from '@/lib/dal';
+import { RULES, consume, retryMessage } from '@/lib/rate-limit';
 import { bookingConfirmationEmail } from '@/lib/emails/booking-confirmation';
 import { sendMail } from '@/lib/mailer';
 import {
@@ -14,9 +15,14 @@ import {
   getBookingByReference,
   type PassengerInput,
 } from '@/lib/queries/bookings';
-import { BookingSchema, PassengerSchema, fieldErrors, type ActionState } from '@/lib/validation';
+import {
+  BookingSchema,
+  IdSchema,
+  PassengerSchema,
+  fieldErrors,
+  type ActionState,
+} from '@/lib/validation';
 
-/** Luhn checksum — the same check a payment gateway runs before authorising. */
 function luhnValid(number: string): boolean {
   const digits = number.replace(/\D/g, '');
   if (digits.length < 13 || digits.length > 19) return false;
@@ -41,7 +47,6 @@ function expiryInFuture(expiry: string): boolean {
   const month = Number(match[1]);
   const year = 2000 + Number(match[2]);
   if (month < 1 || month > 12) return false;
-  // Valid through the last day of the stated month.
   return new Date(year, month, 1).getTime() > Date.now();
 }
 
@@ -55,6 +60,9 @@ function ageOn(dateOfBirth: string, reference: Date): number {
 
 export async function book(_state: ActionState, formData: FormData): Promise<ActionState> {
   const user = await requireUser();
+
+  const quota = await consume('booking:user', String(user.id), RULES.booking);
+  if (!quota.allowed) return { message: retryMessage(quota.retryAfterMs) };
 
   const returnRaw = formData.get('return_flight_id');
   const parsed = BookingSchema.safeParse({
@@ -77,10 +85,10 @@ export async function book(_state: ActionState, formData: FormData): Promise<Act
 
   const types = formData.getAll('passenger_type');
   if (types.length === 0) {
-    return { message: 'Ajoutez au moins un passager.' };
+    return { message: 'Add at least one passenger.' };
   }
   if (types.length > 9) {
-    return { message: 'Neuf passagers maximum par réservation.' };
+    return { message: 'Nine passengers maximum per booking.' };
   }
 
   const firstNames = formData.getAll('first_name');
@@ -116,17 +124,17 @@ export async function book(_state: ActionState, formData: FormData): Promise<Act
 
     const age = ageOn(candidate.data.date_of_birth, now);
     if (age < 0 || age > 120) {
-      errors[`passenger.${i}.date_of_birth`] = ['Date de naissance invalide.'];
+      errors[`passenger.${i}.date_of_birth`] = ['Invalid date of birth.'];
     } else if (candidate.data.passenger_type === 'adult' && age < 12) {
-      errors[`passenger.${i}.passenger_type`] = ['Un adulte doit avoir au moins 12 ans.'];
+      errors[`passenger.${i}.passenger_type`] = ['An adult must be at least 12 years old.'];
     } else if (candidate.data.passenger_type === 'child' && (age < 2 || age >= 12)) {
-      errors[`passenger.${i}.passenger_type`] = ['Un enfant doit avoir entre 2 et 11 ans.'];
+      errors[`passenger.${i}.passenger_type`] = ['A child must be between 2 and 11 years old.'];
     } else if (candidate.data.passenger_type === 'infant' && age >= 2) {
-      errors[`passenger.${i}.passenger_type`] = ['Un bébé doit avoir moins de 2 ans.'];
+      errors[`passenger.${i}.passenger_type`] = ['An infant must be under 2 years old.'];
     }
 
     if (candidate.data.passport_expiry <= now.toISOString().slice(0, 10)) {
-      errors[`passenger.${i}.passport_expiry`] = ['Le passeport est expiré.'];
+      errors[`passenger.${i}.passport_expiry`] = ['The passport has expired.'];
     }
 
     passengers.push(candidate.data);
@@ -134,21 +142,21 @@ export async function book(_state: ActionState, formData: FormData): Promise<Act
 
   if (parsed.data.payment_method === 'card') {
     if (!luhnValid(parsed.data.card_number ?? '')) {
-      errors.card_number = ['Numéro de carte invalide.'];
+      errors.card_number = ['Invalid card number.'];
     }
     if ((parsed.data.card_holder ?? '').trim().length < 3) {
-      errors.card_holder = ['Nom du titulaire requis.'];
+      errors.card_holder = ['Cardholder name required.'];
     }
     if (!expiryInFuture(parsed.data.card_expiry ?? '')) {
-      errors.card_expiry = ['Date d’expiration invalide ou dépassée (MM/AA).'];
+      errors.card_expiry = ['Invalid or past expiry date (MM/YY).'];
     }
     if (!/^\d{3,4}$/.test((parsed.data.card_cvc ?? '').trim())) {
-      errors.card_cvc = ['Cryptogramme à 3 ou 4 chiffres.'];
+      errors.card_cvc = ['Security code must be 3 or 4 digits.'];
     }
   }
 
   if (Object.keys(errors).length > 0) {
-    return { errors, message: 'Certaines informations sont incomplètes ou invalides.' };
+    return { errors, message: 'Some of the details are incomplete or invalid.' };
   }
 
   let reference: string;
@@ -173,39 +181,42 @@ export async function book(_state: ActionState, formData: FormData): Promise<Act
     throw error;
   }
 
-  // The e-ticket leaves after the response: a slow or unreachable mail server
-  // must never hold up — or undo — a booking that is already paid.
   after(async () => {
     const booking = await getBookingByReference(reference);
     if (!booking) return;
     await sendMail({ to: booking.contact_email, ...bookingConfirmationEmail(booking) });
   });
 
-  revalidatePath('/compte/reservations');
-  redirect(`/reservation/${reference}`);
+  revalidatePath('/account/bookings');
+  redirect(`/booking/${reference}`);
 }
 
 export async function cancel(_state: ActionState, formData: FormData): Promise<ActionState> {
   const user = await requireUser();
-  const bookingId = Number(formData.get('booking_id'));
 
-  const booking = await getBookingById(bookingId);
-  if (!booking) return { message: 'Réservation introuvable.' };
-  if (booking.user_id !== user.id && user.role !== 'admin') {
-    return { message: "Vous n'avez pas accès à cette réservation." };
+  const quota = await consume('cancel:user', String(user.id), RULES.cancellation);
+  if (!quota.allowed) return { message: retryMessage(quota.retryAfterMs) };
+
+  const parsedId = IdSchema.safeParse(formData.get('booking_id'));
+  if (!parsedId.success) return { message: 'Booking not found.' };
+
+  const booking = await getBookingById(parsedId.data);
+  if (!booking || (booking.user_id !== user.id && user.role !== 'admin')) {
+    return { message: 'Booking not found.' };
   }
+  const bookingId = booking.id;
 
   try {
     const { refund, rate } = await cancelBooking(bookingId, user.id);
-    revalidatePath('/compte/reservations');
-    revalidatePath(`/reservation/${booking.reference}`);
-    revalidatePath('/admin/reservations');
+    revalidatePath('/account/bookings');
+    revalidatePath(`/booking/${booking.reference}`);
+    revalidatePath('/admin/bookings');
     return {
       success: true,
       message:
         refund > 0
-          ? `Réservation annulée. Remboursement de ${refund.toFixed(2)} € (${Math.round(rate * 100)} % du montant payé).`
-          : 'Réservation annulée. Aucun remboursement : le départ a lieu dans moins de 24 heures.',
+          ? `Booking cancelled. Refund of €${refund.toFixed(2)} (${Math.round(rate * 100)}% of the amount paid).`
+          : 'Booking cancelled. No refund: departure is less than 24 hours away.',
     };
   } catch (error) {
     if (error instanceof BookingError) return { message: error.message };

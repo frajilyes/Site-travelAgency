@@ -18,16 +18,16 @@ export default function GlobalError({
       <p className="text-6xl" aria-hidden="true">
         ⚠️
       </p>
-      <h1 className="mt-4 text-2xl font-bold tracking-tight">Une erreur est survenue</h1>
+      <h1 className="mt-4 text-2xl font-bold tracking-tight">Something went wrong</h1>
       <p className="mt-2 text-sm text-ink-muted">
-        L’opération n’a pas pu aboutir. Vous pouvez réessayer ; si le problème persiste, contactez le
-        service client.
+        The operation could not be completed. You can try again; if the problem persists, please
+        contact customer service.
       </p>
       {error.digest ? (
-        <p className="mt-2 font-mono text-xs text-ink-muted">Référence : {error.digest}</p>
+        <p className="mt-2 font-mono text-xs text-ink-muted">Reference: {error.digest}</p>
       ) : null}
       <button type="button" onClick={reset} className="btn btn-primary mt-6">
-        Réessayer
+        Try again
       </button>
     </div>
   );

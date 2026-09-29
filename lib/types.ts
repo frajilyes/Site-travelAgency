@@ -10,24 +10,24 @@ export type PassengerType = 'adult' | 'child' | 'infant';
 export const CABIN_CLASSES: CabinClass[] = ['economy', 'business', 'first'];
 
 export const CABIN_LABELS: Record<CabinClass, string> = {
-  economy: 'Économique',
-  business: 'Affaires',
-  first: 'Première',
+  economy: 'Economy',
+  business: 'Business',
+  first: 'First',
 };
 
 export const BOOKING_STATUS_LABELS: Record<BookingStatus, string> = {
-  pending: 'En attente de paiement',
-  confirmed: 'Confirmée',
-  cancelled: 'Annulée',
-  completed: 'Terminée',
+  pending: 'Awaiting payment',
+  confirmed: 'Confirmed',
+  cancelled: 'Cancelled',
+  completed: 'Completed',
 };
 
 export const FLIGHT_STATUS_LABELS: Record<FlightStatus, string> = {
-  scheduled: 'Programmé',
-  delayed: 'Retardé',
-  cancelled: 'Annulé',
-  departed: 'Décollé',
-  landed: 'Atterri',
+  scheduled: 'Scheduled',
+  delayed: 'Delayed',
+  cancelled: 'Cancelled',
+  departed: 'Departed',
+  landed: 'Landed',
 };
 
 export interface Country {
@@ -101,7 +101,6 @@ export interface Flight {
   created_at: string;
 }
 
-/** A flight joined with its airline, aircraft and both airports. */
 export interface FlightDetail extends Flight {
   airline_name: string;
   airline_iata: string;
@@ -120,7 +119,6 @@ export interface FlightDetail extends Flight {
 export interface User {
   id: number;
   email: string;
-  /** Empty string for accounts that only sign in through Google. */
   password_hash: string;
   google_id: string | null;
   first_name: string;
@@ -128,11 +126,11 @@ export interface User {
   phone: string | null;
   role: Role;
   status: UserStatus;
+  session_version: number;
   created_at: string;
   updated_at: string;
 }
 
-/** User data safe to send to the client — never includes the password hash. */
 export interface PublicUser {
   id: number;
   email: string;
@@ -190,7 +188,6 @@ export interface Payment {
   created_at: string;
 }
 
-/** A booking with its flights, passengers and payments resolved. */
 export interface BookingDetail extends Booking {
   outbound: FlightDetail;
   returnFlight: FlightDetail | null;
@@ -206,5 +203,6 @@ export interface AuditLog {
   entity: string;
   entity_id: string | null;
   details: string | null;
+  ip: string | null;
   created_at: string;
 }

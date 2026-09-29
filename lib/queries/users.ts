@@ -1,21 +1,9 @@
 import 'server-only';
-import type { Document } from 'mongodb';
-import {
-  AS_ENTITY,
-  type Doc,
-  auditLogsCol,
-  bookingsCol,
-  fromDoc,
-  literal,
-  nextId,
-  now,
-  passengersCol,
-  paymentsCol,
-  usersCol,
-} from '../mongodb';
-import type { AuditLog, PublicUser, Role, User, UserStatus } from '../types';
+import { AS_ENTITY, fromDoc, literal, now, pipeline, type Doc, type Stage } from '../db';
+import { AuditLogModel, UserModel } from '../models/users';
+import { BookingModel, PassengerModel, PaymentModel } from '../models/bookings';
+import type { AuditLog, PublicUser, Role, UserStatus } from '../types';
 
-/** Never send the password hash or the Google id to a caller expecting a PublicUser. */
 const PUBLIC_PROJECTION = {
   email: 1,
   first_name: 1,
@@ -26,31 +14,113 @@ const PUBLIC_PROJECTION = {
   created_at: 1,
 } as const;
 
-export async function findUserByEmail(email: string): Promise<User | undefined> {
-  const users = await usersCol();
-  return fromDoc<User>(await users.findOne({ email: email.toLowerCase() }));
+const SESSION_PROJECTION = { ...PUBLIC_PROJECTION, session_version: 1 } as const;
+
+const ACCOUNT_PROJECTION = { ...SESSION_PROJECTION, google_id: 1 } as const;
+
+const CREDENTIALS_PROJECTION = {
+  email: 1,
+  password_hash: 1,
+  role: 1,
+  status: 1,
+  session_version: 1,
+} as const;
+
+export interface UserAccount extends PublicUser {
+  google_id: string | null;
+  session_version: number;
 }
 
-export async function findUserByGoogleId(googleId: string): Promise<User | undefined> {
-  const users = await usersCol();
-  return fromDoc<User>(await users.findOne({ google_id: googleId }));
+export interface SessionUser extends PublicUser {
+  session_version: number;
 }
 
-export async function getUser(id: number): Promise<PublicUser | undefined> {
-  const users = await usersCol();
-  return fromDoc<PublicUser>(
-    (await users.findOne({ _id: id }, { projection: PUBLIC_PROJECTION })) as Doc<PublicUser> | null,
+export interface UserCredentials {
+  id: number;
+  email: string;
+  password_hash: string;
+  role: Role;
+  status: UserStatus;
+  session_version: number;
+}
+
+function emailKey(email: string): string {
+  return email.trim().toLowerCase();
+}
+
+function withVersion<T extends { session_version?: number }>(record: T | undefined): T | undefined {
+  if (!record) return undefined;
+  if (typeof record.session_version !== 'number') record.session_version = 1;
+  return record;
+}
+
+export async function backfillSessionVersions(): Promise<number> {
+  const result = await UserModel.updateMany(
+    { session_version: { $exists: false } },
+    { $set: { session_version: 1 } },
+  );
+  return result.modifiedCount;
+}
+
+export async function findUserByEmail(email: string): Promise<UserAccount | undefined> {
+  return withVersion(
+    fromDoc<UserAccount>(
+      await UserModel.findOne({ email: emailKey(email) }, ACCOUNT_PROJECTION).lean<
+        Doc<UserAccount> | null
+      >(),
+    ),
   );
 }
 
-/** The check `getCurrentUser` runs on every request: the account must still be usable. */
-export async function findActiveUser(id: number): Promise<PublicUser | undefined> {
-  const users = await usersCol();
+export async function findUserByGoogleId(googleId: string): Promise<UserAccount | undefined> {
+  return withVersion(
+    fromDoc<UserAccount>(
+      await UserModel.findOne({ google_id: googleId }, ACCOUNT_PROJECTION).lean<
+        Doc<UserAccount> | null
+      >(),
+    ),
+  );
+}
+
+export async function findUserCredentials(email: string): Promise<UserCredentials | undefined> {
+  return withVersion(
+    fromDoc<UserCredentials>(
+      await UserModel.findOne({ email: emailKey(email) }, CREDENTIALS_PROJECTION).lean<
+        Doc<UserCredentials> | null
+      >(),
+    ),
+  );
+}
+
+export async function findCredentialsById(id: number): Promise<UserCredentials | undefined> {
+  return withVersion(
+    fromDoc<UserCredentials>(
+      await UserModel.findOne({ _id: id }, CREDENTIALS_PROJECTION).lean<
+        Doc<UserCredentials> | null
+      >(),
+    ),
+  );
+}
+
+export async function emailTaken(email: string, exceptId?: number): Promise<boolean> {
+  const query: Stage = { email: emailKey(email) };
+  if (exceptId !== undefined) query._id = { $ne: exceptId };
+  return (await UserModel.countDocuments(query)) > 0;
+}
+
+export async function getUser(id: number): Promise<PublicUser | undefined> {
   return fromDoc<PublicUser>(
-    (await users.findOne(
-      { _id: id, status: 'active' },
-      { projection: PUBLIC_PROJECTION },
-    )) as Doc<PublicUser> | null,
+    await UserModel.findOne({ _id: id }, PUBLIC_PROJECTION).lean<Doc<PublicUser> | null>(),
+  );
+}
+
+export async function findActiveUser(id: number): Promise<SessionUser | undefined> {
+  return withVersion(
+    fromDoc<SessionUser>(
+      await UserModel.findOne({ _id: id, status: 'active' }, SESSION_PROJECTION).lean<
+        Doc<SessionUser> | null
+      >(),
+    ),
   );
 }
 
@@ -65,13 +135,9 @@ export interface NewUser {
 }
 
 export async function createUser(input: NewUser): Promise<number> {
-  const users = await usersCol();
-  const id = await nextId('users');
   const timestamp = now();
-
-  await users.insertOne({
-    _id: id,
-    email: input.email.toLowerCase(),
+  const created = await UserModel.create({
+    email: emailKey(input.email),
     password_hash: input.password_hash,
     google_id: input.google_id ?? null,
     first_name: input.first_name,
@@ -79,10 +145,11 @@ export async function createUser(input: NewUser): Promise<number> {
     phone: input.phone,
     role: input.role ?? 'user',
     status: 'active',
+    session_version: 1,
     created_at: timestamp,
     updated_at: timestamp,
   });
-  return id;
+  return created._id;
 }
 
 export interface UserWithStats extends PublicUser {
@@ -93,7 +160,7 @@ export interface UserWithStats extends PublicUser {
 export async function listUsers(
   filter: { search?: string; role?: Role; status?: UserStatus } = {},
 ): Promise<UserWithStats[]> {
-  const query: Document = {};
+  const query: Stage = {};
 
   if (filter.search) {
     const like = literal(filter.search);
@@ -102,9 +169,8 @@ export async function listUsers(
   if (filter.role) query.role = filter.role;
   if (filter.status) query.status = filter.status;
 
-  const users = await usersCol();
-  return users
-    .aggregate<UserWithStats>([
+  return UserModel.aggregate<UserWithStats>(
+    pipeline([
       { $match: query },
       { $sort: { created_at: -1 } },
       {
@@ -112,7 +178,6 @@ export async function listUsers(
           from: 'bookings',
           localField: '_id',
           foreignField: 'user_id',
-          // Only the two fields the totals need, not the whole booking.
           pipeline: [{ $project: { _id: 0, status: 1, total_price: 1 } }],
           as: 'placed',
         },
@@ -139,108 +204,106 @@ export async function listUsers(
       },
       { $project: { ...PUBLIC_PROJECTION, bookings: 1, spent: 1 } },
       ...AS_ENTITY,
-    ])
-    .toArray();
+    ]),
+  );
 }
 
 export async function updateProfile(
   id: number,
   input: { first_name: string; last_name: string; phone: string | null; email: string },
 ): Promise<void> {
-  const users = await usersCol();
-  await users.updateOne(
+  await UserModel.updateOne(
     { _id: id },
     {
       $set: {
         first_name: input.first_name,
         last_name: input.last_name,
         phone: input.phone,
-        email: input.email.toLowerCase(),
+        email: emailKey(input.email),
         updated_at: now(),
       },
     },
   );
 }
 
-/** False for Google-only accounts, which were created without a password. */
 export async function hasPassword(id: number): Promise<boolean> {
-  const users = await usersCol();
-  const user = await users.findOne({ _id: id }, { projection: { password_hash: 1 } });
+  const user = await UserModel.findOne({ _id: id }, { password_hash: 1 }).lean<{
+    password_hash: string;
+  } | null>();
   return Boolean(user?.password_hash);
 }
 
-/** Attach a Google account to an existing user, matched on their e-mail. */
 export async function linkGoogleAccount(id: number, googleId: string): Promise<void> {
-  const users = await usersCol();
-  await users.updateOne({ _id: id }, { $set: { google_id: googleId, updated_at: now() } });
+  await UserModel.updateOne({ _id: id }, { $set: { google_id: googleId, updated_at: now() } });
 }
 
 export async function updatePassword(id: number, passwordHash: string): Promise<void> {
-  const users = await usersCol();
-  await users.updateOne({ _id: id }, { $set: { password_hash: passwordHash, updated_at: now() } });
+  await UserModel.updateOne(
+    { _id: id },
+    { $set: { password_hash: passwordHash, updated_at: now() }, $inc: { session_version: 1 } },
+  );
+}
+
+export async function refreshPasswordHash(id: number, passwordHash: string): Promise<void> {
+  await UserModel.updateOne({ _id: id }, { $set: { password_hash: passwordHash } });
 }
 
 export async function setUserRole(id: number, role: Role): Promise<void> {
-  const users = await usersCol();
-  await users.updateOne({ _id: id }, { $set: { role, updated_at: now() } });
+  await UserModel.updateOne(
+    { _id: id },
+    { $set: { role, updated_at: now() }, $inc: { session_version: 1 } },
+  );
 }
 
 export async function setUserStatus(id: number, status: UserStatus): Promise<void> {
-  const users = await usersCol();
-  await users.updateOne({ _id: id }, { $set: { status, updated_at: now() } });
+  await UserModel.updateOne(
+    { _id: id },
+    { $set: { status, updated_at: now() }, $inc: { session_version: 1 } },
+  );
 }
 
-/**
- * Delete a user with everything that hung off them. MongoDB has no foreign
- * keys, so the cascade the SQL schema declared is spelled out here: bookings
- * and their passengers and payments go, audit entries keep the trace but lose
- * the actor.
- */
-export async function deleteUser(id: number): Promise<void> {
-  const [users, bookings, passengers, payments, auditLogs] = await Promise.all([
-    usersCol(),
-    bookingsCol(),
-    passengersCol(),
-    paymentsCol(),
-    auditLogsCol(),
-  ]);
+export async function revokeSessions(id: number): Promise<void> {
+  await UserModel.updateOne({ _id: id }, { $inc: { session_version: 1 } });
+}
 
-  const owned = await bookings.find({ user_id: id }, { projection: { _id: 1 } }).toArray();
+export async function deleteUser(id: number): Promise<void> {
+  const owned = await BookingModel.find({ user_id: id }, { _id: 1 }).lean<{ _id: number }[]>();
   const bookingIds = owned.map((booking) => booking._id);
 
   if (bookingIds.length > 0) {
     await Promise.all([
-      passengers.deleteMany({ booking_id: { $in: bookingIds } }),
-      payments.deleteMany({ booking_id: { $in: bookingIds } }),
+      PassengerModel.deleteMany({ booking_id: { $in: bookingIds } }),
+      PaymentModel.deleteMany({ booking_id: { $in: bookingIds } }),
     ]);
-    await bookings.deleteMany({ _id: { $in: bookingIds } });
+    await BookingModel.deleteMany({ _id: { $in: bookingIds } });
   }
 
-  await auditLogs.updateMany({ user_id: id }, { $set: { user_id: null } });
-  await users.deleteOne({ _id: id });
+  await AuditLogModel.updateMany({ user_id: id }, { $set: { user_id: null } });
+  await UserModel.deleteOne({ _id: id });
 }
 
 export async function countAdmins(): Promise<number> {
-  const users = await usersCol();
-  return users.countDocuments({ role: 'admin', status: 'active' });
+  return UserModel.countDocuments({ role: 'admin', status: 'active' });
 }
 
-/** Append an entry to the administration audit trail. */
-export async function logAction(
-  userId: number | null,
-  action: string,
-  entity: string,
-  entityId: string | number | null,
-  details: string,
-): Promise<void> {
-  const auditLogs = await auditLogsCol();
-  await auditLogs.insertOne({
-    _id: await nextId('audit_logs'),
-    user_id: userId,
-    action,
-    entity,
-    entity_id: entityId === null ? null : String(entityId),
-    details,
+export interface AuditInput {
+  userId: number | null;
+  action: string;
+  entity: string;
+  entityId?: string | number | null;
+  details: string;
+  ip?: string | null;
+}
+
+export async function logAction(entry: AuditInput): Promise<void> {
+  await AuditLogModel.create({
+    user_id: entry.userId,
+    action: entry.action,
+    entity: entry.entity,
+    entity_id:
+      entry.entityId === null || entry.entityId === undefined ? null : String(entry.entityId),
+    details: entry.details.slice(0, 500),
+    ip: entry.ip ? entry.ip.slice(0, 64) : null,
     created_at: now(),
   });
 }
@@ -250,11 +313,10 @@ export interface AuditEntry extends AuditLog {
 }
 
 export async function listAuditLogs(limit = 100): Promise<AuditEntry[]> {
-  const auditLogs = await auditLogsCol();
-  return auditLogs
-    .aggregate<AuditEntry>([
+  return AuditLogModel.aggregate<AuditEntry>(
+    pipeline([
       { $sort: { _id: -1 } },
-      { $limit: limit },
+      { $limit: Math.min(Math.max(1, Math.trunc(limit)), 500) },
       { $lookup: { from: 'users', localField: 'user_id', foreignField: '_id', as: 'actor_user' } },
       {
         $set: {
@@ -274,6 +336,6 @@ export async function listAuditLogs(limit = 100): Promise<AuditEntry[]> {
       },
       { $unset: 'actor_user' },
       ...AS_ENTITY,
-    ])
-    .toArray();
+    ]),
+  );
 }

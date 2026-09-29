@@ -1,53 +1,56 @@
-# SkyRoute — agence de voyages en ligne
+# SkyRoute — online travel agency
 
-Application complète de réservation de vols internationaux : recherche, comparaison, réservation
-multi-passagers, paiement, billet électronique, annulation avec remboursement, et une zone
-d'administration couvrant l'ensemble du référentiel.
+A complete international flight booking application: search, comparison, multi-passenger booking,
+payment, e-ticket, cancellation with refund, and an administration area covering the whole
+reference dataset.
 
-Tout fonctionne réellement : les données vivent dans une base MongoDB, les places sont
-décomptées à la réservation et rendues à l'annulation, les prix sont calculés et les règles métier
-(âges, passeports, capacité des appareils, quota d'administrateurs) sont appliquées côté serveur.
+Everything really works: the data lives in a MongoDB database, seats are decremented on booking and
+returned on cancellation, prices are calculated, and the business rules (ages, passports, aircraft
+capacity, administrator quota) are enforced on the server.
 
-## Démarrage
+## Getting started
 
-Il faut un serveur MongoDB accessible : une installation locale (`mongodb://127.0.0.1:27017`,
-la valeur par défaut) ou un cluster MongoDB Atlas.
+You need a reachable MongoDB server: a local installation (`mongodb://127.0.0.1:27017`, the
+default) or a MongoDB Atlas cluster.
 
 ```bash
 npm install
-npm run setup     # crée .env.local avec un SESSION_SECRET aléatoire
+npm run setup     # creates .env.local with random secrets
 npm run dev       # http://localhost:3000
 ```
 
-Pour viser un autre serveur, renseignez `MONGODB_URI` (et éventuellement `MONGODB_DB`) dans
-`.env.local` :
+To point at a different server, set `MONGODB_URI` (and optionally `MONGODB_DB`) in `.env.local`:
 
 ```
-MONGODB_URI=mongodb+srv://<utilisateur>:<motdepasse>@<cluster>.mongodb.net
+MONGODB_URI=mongodb+srv://<user>:<password>@<cluster>.mongodb.net
 MONGODB_DB=skyroute
 ```
 
-Au premier démarrage, la base `skyroute` est créée, indexée et peuplée automatiquement : 35 pays,
-55 aéroports, 27 compagnies, 10 types d'appareils et environ 53 000 vols répartis sur les 28 jours
-à venir, plus deux comptes de démonstration.
+On the first start the `skyroute` database is created, indexed and populated automatically: 35
+countries, 55 airports, 27 airlines, 10 aircraft types and roughly 53,000 flights spread over the
+next 28 days, plus two demonstration accounts.
 
-### Comptes de démonstration
+### Demonstration accounts
 
-| Rôle | Identifiant | Mot de passe |
+They are only created when `SEED_DEMO_ACCOUNTS=true` (which is what `npm run setup` writes into
+`.env.local`). Because their passwords are public, the value `true` is refused at startup as soon as
+`APP_URL` points at anything other than the local machine.
+
+| Role | Username | Password |
 | --- | --- | --- |
-| Administrateur | `admin@skyroute.fr` | `Admin@2026` |
-| Client | `client@skyroute.fr` | `Client@2026` |
+| Administrator | `admin@skyroute.fr` | `Admin.SkyRoute2026` |
+| Customer | `client@skyroute.fr` | `Client.SkyRoute2026` |
 
-### Connexion avec Google (facultatif)
+### Sign in with Google (optional)
 
-Le bouton « Continuer avec Google » n'apparaît sur `/connexion` et `/inscription` que si un client
-OAuth est configuré :
+The "Continue with Google" button only appears on `/login` and `/register` when an OAuth client is
+configured:
 
-1. Dans la [console Google Cloud](https://console.cloud.google.com/apis/credentials), renseigner
-   l'écran de consentement OAuth, puis créer un **ID client OAuth** de type « Application Web ».
-2. Ajouter l'URI de redirection autorisé, qui doit correspondre exactement à `APP_URL` :
+1. In the [Google Cloud console](https://console.cloud.google.com/apis/credentials), fill in the
+   OAuth consent screen, then create an **OAuth client ID** of type "Web application".
+2. Add the authorised redirect URI, which must match `APP_URL` exactly:
    `http://localhost:3000/api/auth/google/callback`.
-3. Compléter `.env.local` :
+3. Complete `.env.local`:
 
 ```bash
 GOOGLE_CLIENT_ID=xxxxxxxx.apps.googleusercontent.com
@@ -55,148 +58,180 @@ GOOGLE_CLIENT_SECRET=xxxxxxxx
 APP_URL=http://localhost:3000
 ```
 
-Le flux utilise le code d'autorisation avec PKCE ; l'`id_token` renvoyé est vérifié contre les clés
-publiques de Google. Si l'adresse Google correspond à un compte existant, le compte est simplement
-lié ; sinon un compte est créé sans mot de passe et la section « Sécurité » du profil l'indique.
+The flow uses the authorization code grant with PKCE; the returned `id_token` is verified against
+Google's public keys. If the Google address matches an existing account, the account is simply
+linked; otherwise a new account is created without a password and the "Security" section of the
+profile says so.
 
-### Email de confirmation (SMTP)
+### Confirmation email (SMTP)
 
-L'email part dès qu'une réservation est payée. Il faut pour cela un compte SMTP ; avec Gmail :
+The email goes out as soon as a booking is paid. That needs an SMTP account; with Gmail:
 
-1. Activer la validation en deux étapes sur le compte Google.
-2. Créer un **mot de passe d'application** sur <https://myaccount.google.com/apppasswords> (le mot
-   de passe habituel du compte est refusé par le serveur SMTP).
-3. Compléter `.env.local` :
+1. Enable two-step verification on the Google account.
+2. Create an **app password** at <https://myaccount.google.com/apppasswords> (the account's normal
+   password is refused by the SMTP server).
+3. Complete `.env.local`:
 
 ```bash
-SMTP_USER=votre.adresse@gmail.com
-SMTP_PASS=les16caracteres
-MAIL_FROM=SkyRoute <votre.adresse@gmail.com>
+SMTP_USER=your.address@gmail.com
+SMTP_PASS=the16characters
+MAIL_FROM=SkyRoute <your.address@gmail.com>
 APP_URL=http://localhost:3000
 ```
 
-Sans ces variables, la réservation aboutit normalement et un avertissement est écrit dans la
-console à la place de l'envoi. Le gabarit se relit dans un navigateur, sans rien envoyer, sur
-`/api/emails/reservation/<REFERENCE>` (réservé au titulaire du dossier et aux administrateurs).
+Without these variables the booking still completes normally and a warning is written to the console
+instead of sending. The SMTP connection requires TLS 1.2 at minimum and verifies the server
+certificate: a plaintext send is refused rather than attempted.
 
-## Fonctionnalités
+## Features
 
-### Espace public
+### Public area
 
-- **Recherche de vols** par aéroport de départ et d'arrivée (autocomplétion sur la ville, le nom ou
-  le code IATA), date, classe et composition du groupe (adultes, enfants, bébés).
-- **Aller simple ou aller-retour** : en aller-retour, l'aller puis le retour se choisissent
-  séparément et un récapitulatif affiche le total avant de continuer.
-- **Filtres et tri** par compagnie, prix maximum, prix croissant, durée ou heure de départ.
-- **Calendrier de prix** sur ±3 jours pour repérer une date moins chère.
-- **Fiches destinations** par pays : aéroports desservis, monnaie, indicatif, fuseau horaire,
-  formalités d'entrée et meilleurs tarifs au départ de Paris.
-- **Aide, franchises bagages et conditions générales de vente.**
+- **Flight search** by origin and destination airport (autocomplete on city, name or IATA code),
+  date, cabin and party composition (adults, children, infants).
+- **One way or round trip**: on a round trip the outbound and return legs are chosen separately and
+  a summary shows the total before you continue.
+- **Filters and sorting** by airline, maximum price, lowest price, duration or departure time.
+- **Price calendar** over ±3 days, to spot a cheaper date.
+- **Destination pages** per country: airports served, currency, dialling code, timezone, entry
+  requirements and best fares departing from Paris.
+- **Help, baggage allowances and terms and conditions of sale.**
 
-### Réservation
+### Booking
 
-- Saisie d'un passager par siège, avec type (adulte / enfant / bébé), état civil, nationalité et
-  passeport. Les âges sont vérifiés contre le type déclaré et les passeports expirés sont refusés.
-- Tarification : plein tarif adulte, −25 % enfant, 10 % bébé, puis 12 % de taxes et 22 € de
-  redevances par passager et par segment. Le détail est affiché avant paiement.
-- Paiement par carte (validation de Luhn, date d'expiration et cryptogramme), PayPal ou virement.
-- Attribution automatique d'un siège par passager selon la cabine ; les bébés voyagent sur les
-  genoux et n'occupent pas de place.
-- Billet électronique imprimable avec référence de dossier à six caractères, sièges, horaires,
-  franchise bagages et historique des transactions.
-- **Email de confirmation** envoyé automatiquement à l'adresse de contact dès la réservation payée :
-  référence, vols aller et retour, passagers, sièges, détail du prix et lien vers le dossier.
-- Annulation en ligne : remboursement intégral à plus de 7 jours du départ, 50 % entre 7 jours et
-  24 heures, aucun ensuite. Les sièges libérés repartent immédiatement à la vente.
+- One passenger entered per seat, with type (adult / child / infant), gender, nationality and
+  passport. Ages are checked against the declared type and expired passports are refused.
+- Pricing: full adult fare, −25% child, 10% infant, then 12% taxes and €22 of charges per passenger
+  per segment. The breakdown is shown before payment.
+- Payment by card (Luhn check, expiry date and security code), PayPal or bank transfer.
+- Automatic seat allocation per passenger according to the cabin; infants travel on a lap and do not
+  occupy a seat.
+- Printable e-ticket with a six-character booking reference, seats, times, baggage allowance and
+  transaction history.
+- **Confirmation email** sent automatically to the contact address as soon as the booking is paid:
+  reference, outbound and return flights, passengers, seats, price breakdown and a link to the
+  booking.
+- Online cancellation: full refund more than 7 days before departure, 50% between 7 days and 24
+  hours, none after that. Released seats go straight back on sale.
 
-### Espace client
+### Customer area
 
-- Profil modifiable et changement de mot de passe.
-- Voyages à venir et historique, avec accès direct à chaque billet.
+- Editable profile and password change.
+- Upcoming trips and history, with direct access to each ticket.
 
 ### Administration
 
-- **Tableau de bord** : chiffre d'affaires par mois, lignes les plus réservées, panier moyen,
-  passagers transportés, dernières réservations et dernières opérations.
-- **Vols** : création, modification, changement de statut, suppression, recherche et filtres
-  (compagnie, statut, période), pagination. La distance, la durée et l'heure d'arrivée locale sont
-  calculées automatiquement à partir des aéroports et de l'appareil.
-- **Réservations** : recherche, filtre par statut, changement de statut et annulation avec
-  remboursement.
-- **Utilisateurs** : création, modification, changement de rôle, suspension, suppression. Le dernier
-  administrateur actif ne peut être ni suspendu ni supprimé ni rétrogradé.
-- **Référentiel** : pays, aéroports, compagnies et flotte, avec garde-fous d'intégrité (un élément
-  encore référencé ne peut pas être supprimé).
-- **Journal** des opérations (connexions, réservations, modifications, suppressions).
+- **Dashboard**: revenue by month, most booked routes, average basket, passengers carried, latest
+  bookings and latest operations.
+- **Flights**: create, edit, change status, delete, search and filter (airline, status, period),
+  with pagination. Distance, duration and local arrival time are calculated automatically from the
+  airports and the aircraft.
+- **Bookings**: search, filter by status, change status and cancel with refund.
+- **Users**: create, edit, change role, suspend, delete. The last active administrator cannot be
+  suspended, deleted or demoted.
+- **Reference data**: countries, airports, airlines and fleet, with integrity guards (an item that
+  is still referenced cannot be deleted).
+- **Audit log** of operations (sign-ins, bookings, changes, deletions).
 
 ## Architecture
 
 ```
-app/          routes (App Router) — pages publiques, espace client, administration, API
-actions/      Server Actions : authentification, réservation, administration
-components/   composants d'interface, serveur et client
-lib/          connexion MongoDB, session, règles métier
-lib/mongodb.ts  client, collections, séquences d'identifiants, index, transactions
-lib/queries/  accès aux données par domaine
-lib/emails/   gabarits HTML et texte des emails transactionnels
-scripts/      utilitaires de développement
+app/          routes (App Router) — public pages, customer area, administration, API
+actions/      Server Actions: authentication, booking, administration
+components/   interface components, server and client
+lib/          Mongoose connection, session, business rules
+lib/db.ts     connection, id sequences, transactions, auto-increment plugin
+lib/models/   Mongoose schemas and models, one file per domain
+lib/queries/  data access per domain
+lib/emails/   HTML and text templates for transactional emails
+scripts/      development utilities
 ```
 
-- **Next.js 16 (App Router)** avec React Server Components et Server Actions ; toutes les mutations
-  passent par une action serveur qui revalide sa session avant d'agir.
-- **MongoDB via le pilote officiel `mongodb`**. Une collection par entité, et les contraintes que
-  le schéma SQL exprimait en `UNIQUE` sont des index uniques créés au démarrage
-  (`lib/mongodb.ts`). Les documents gardent une clé numérique (`_id`) distribuée par une
-  collection `counters`, l'équivalent d'un `AUTOINCREMENT`.
-- **Intégrité des réservations** : sur un replica set, la réservation et l'annulation s'exécutent
-  dans une transaction. Sur un `mongod` autonome, qui ne les propose pas, chaque écriture
-  enregistre son annulation et une erreur les rejoue à l'envers. Dans les deux cas le décompte des
-  places est un `$inc` conditionné par `$gte` : une place ne peut pas être vendue deux fois.
-  MongoDB n'ayant pas de clés étrangères, les cascades et les suppressions interdites du schéma
-  SQL sont appliquées dans `lib/queries/` (voir `deleteUser` et les fonctions `*Usage`).
-- **Sessions** signées en JWT (`jose`) dans un cookie `httpOnly`, `sameSite=lax`, `secure` en
-  production. `proxy.ts` effectue un filtrage optimiste des routes, mais l'autorisation réelle est
-  vérifiée à chaque page et à chaque action via la couche d'accès aux données (`lib/dal.ts`), qui
-  relit le compte en base — un compte suspendu perd l'accès immédiatement.
-- **Mots de passe** hachés avec `scrypt` et un sel aléatoire par utilisateur, comparés en temps
-  constant.
-- **Validation** des formulaires avec Zod, côté serveur, avec messages d'erreur par champ.
-- **Tailwind CSS 4** avec thème clair/sombre (préférence système ou choix manuel mémorisé).
+- **Next.js 16 (App Router)** with React Server Components and Server Actions; every mutation goes
+  through a server action that revalidates its session before acting.
+- **MongoDB via Mongoose**. One schema per entity (`lib/models/`), with the constraints the SQL
+  schema expressed as `NOT NULL` and `CHECK` carried over as required fields and enumerations, and
+  the `UNIQUE` ones as indexes created at startup (`ensureIndexes`, called once — `autoIndex` is
+  disabled so they are not recreated on every model compilation). Documents keep a numeric key
+  (`_id`) handed out by a `counters` collection, the equivalent of an `AUTOINCREMENT`; a schema
+  plugin (`autoIncrement` in `lib/db.ts`) assigns it automatically on creation. All reads go through
+  `.lean()`, which returns plain objects instead of hydrated Mongoose documents — faster, and
+  necessary for a Server Component to be able to serialise them.
+- **Booking integrity**: on a replica set, booking and cancellation run inside a transaction. On a
+  standalone `mongod`, which does not offer them, each write records its undo and an error replays
+  them backwards. In both cases the seat count is an `$inc` guarded by `$gte`: a seat cannot be sold
+  twice. As MongoDB has no foreign keys, the cascades and forbidden deletions of the SQL schema are
+  enforced in `lib/queries/` (see `deleteUser` and the `*Usage` functions).
+- **Sessions** signed as JWTs (`jose`) in an `httpOnly`, `sameSite=lax` cookie, `secure` in
+  production. `proxy.ts` performs optimistic route filtering, but the real authorisation is checked
+  on every page and every action through the data access layer (`lib/dal.ts`), which re-reads the
+  account from the database — a suspended account loses access immediately.
+- **Passwords** hashed with `scrypt` and a random per-user salt, compared in constant time.
+- **Validation** of forms with Zod, on the server, with per-field error messages.
+- **Tailwind CSS 4** with a light/dark theme (system preference or a remembered manual choice).
 
-## Commandes
+## Commands
 
-| Commande | Effet |
+| Command | Effect |
 | --- | --- |
-| `npm run dev` | serveur de développement |
-| `npm run build` | build de production |
-| `npm start` | serveur de production |
+| `npm run dev` | development server |
+| `npm run build` | production build |
+| `npm start` | production server |
 | `npm run lint` | ESLint |
-| `npm run typecheck` | vérification TypeScript |
-| `npm run setup` | génère `.env.local` |
-| `npm run db:reset` | supprime la base MongoDB ; elle est recréée et repeuplée au démarrage suivant |
+| `npm run typecheck` | TypeScript check |
+| `npm run setup` | generates `.env.local` |
+| `npm run db:reset` | drops the MongoDB database; it is recreated and reseeded on the next start |
 
-## Variables d'environnement
+## Environment variables
 
-| Variable | Rôle |
+| Variable | Role |
 | --- | --- |
-| `MONGODB_URI` | chaîne de connexion MongoDB (défaut : `mongodb://127.0.0.1:27017`) |
-| `MONGODB_DB` | nom de la base (défaut : `skyroute`) |
-| `SESSION_SECRET` | clé de signature des sessions, 32 caractères minimum (obligatoire) |
-| `GOOGLE_CLIENT_ID` | identifiant client OAuth Google (facultatif : active le bouton « Continuer avec Google ») |
-| `GOOGLE_CLIENT_SECRET` | secret client OAuth Google |
-| `SEED_DAYS` | nombre de jours de vols générés au premier démarrage (28 par défaut) |
-| `SMTP_USER` | compte SMTP expéditeur, par exemple une adresse Gmail |
-| `SMTP_PASS` | mot de passe d'application du compte SMTP |
-| `SMTP_HOST` | serveur SMTP (`smtp.gmail.com` par défaut) |
-| `SMTP_PORT` | port SMTP (`465` par défaut, TLS implicite ; `587` pour STARTTLS) |
-| `SMTP_SECURE` | force le TLS implicite (`true` / `false`) ; déduit du port sinon |
-| `MAIL_FROM` | expéditeur affiché (`SkyRoute <adresse>` par défaut) |
-| `APP_URL` | base des liens des emails et origine de l'URI de redirection Google (`http://localhost:3000` par défaut) |
+| `MONGODB_URI` | MongoDB connection string (default: `mongodb://127.0.0.1:27017`) |
+| `MONGODB_DB` | database name (default: `skyroute`) |
+| `SESSION_SECRET` | session signing key, 32 characters minimum (required) |
+| `PASSWORD_PEPPER` | secret mixed into every password hash; required on a live site |
+| `TRUSTED_PROXY_HOPS` | number of reverse proxies in front of the app, used to read the visitor's real IP (1 by default) |
+| `GOOGLE_CLIENT_ID` | Google OAuth client id (optional: enables the "Continue with Google" button) |
+| `GOOGLE_CLIENT_SECRET` | Google OAuth client secret |
+| `SEED_DAYS` | number of days of flights generated on the first start (28 by default) |
+| `SEED_DEMO_ACCOUNTS` | creates the two demonstration accounts (`false` by default, refused on a live site) |
+| `SEED_ON_BOOT` | populates the database at startup (`true` by default) |
+| `SMTP_USER` | sending SMTP account, for example a Gmail address |
+| `SMTP_PASS` | app password for the SMTP account |
+| `SMTP_HOST` | SMTP server (`smtp.gmail.com` by default) |
+| `SMTP_PORT` | SMTP port (`465` by default, implicit TLS; `587` for STARTTLS) |
+| `SMTP_SECURE` | forces implicit TLS (`true` / `false`); inferred from the port otherwise |
+| `MAIL_FROM` | displayed sender (`SkyRoute <address>` by default) |
+| `APP_URL` | base for email links and the origin of the Google redirect URI (`http://localhost:3000` by default) |
 
-`.env.example` regroupe ces variables prêtes à compléter.
+All of these values are validated at startup (`lib/env.ts`): a secret that is too short, an
+`APP_URL` in plaintext on a public domain, or a remote `MONGODB_URI` without TLS stops the server
+with an explicit message, rather than silently disabling a protection.
+
+`.env.example` gathers these variables ready to fill in. No `.env` file is tracked by Git; a secret
+that has been exposed (a screenshot, a ticket, a public repository) must be regenerated at its
+provider, not merely removed from the file.
+
+## Security
+
+| Area | Measure |
+| --- | --- |
+| Sessions | HS256-signed token (`iss`/`aud`/`sub`), `__Host-` `HttpOnly` `Secure` `SameSite=Lax` cookie, 2-hour sliding window and 7-day absolute cap, renewed by the proxy |
+| Revocation | every account carries a `session_version`; a password, role or status change increments it and immediately invalidates every token issued before |
+| Authorisation | `lib/dal.ts` re-reads the account from the database on every request: the role comes from the database, never from the token; the proxy only redirects |
+| Passwords | scrypt (N=2¹⁵, r=8, p=2) over a peppered HMAC digest, constant-time comparison, automatic re-encoding of older digests, at most 4 concurrent computations |
+| Brute force | quotas shared in the database (MongoDB TTL): 20 attempts / 10 min per IP, account locked after 5 failures / 15 min, separate quotas on registration, booking, cancellation and administration |
+| CSRF | `Origin` / `Sec-Fetch-Site` check on every mutating request, on top of the control built into Server Actions |
+| XSS | strict nonce-based Content-Security-Policy (`strict-dynamic`, `object-src 'none'`, `base-uri 'none'`), one nonce per response |
+| Clickjacking | `frame-ancestors 'none'` and `X-Frame-Options: DENY` |
+| Transport | two-year HSTS with `preload`, `upgrade-insecure-requests`, TLS required to MongoDB and to the SMTP server |
+| Redirects | every `next` parameter is reduced to a path on this site (`//`, `/\` and control characters rejected) |
+| Injection | queries typed and validated by Zod, metacharacters escaped in searches, form identifiers parsed and never coerced on the fly |
+| Data | explicit projections: a password digest is only read by sign-in, and the card number is never stored — only the last four digits are |
+| Traceability | timestamped audit log with the originating address, refused sign-ins included, viewable at `/admin/audit` |
 
 ## Notes
 
-Il s'agit d'un projet de démonstration : aucun paiement réel n'est effectué. Les transactions,
-remboursements et billets sont enregistrés dans la base locale. Seul l'email de confirmation part
-réellement, et uniquement si un compte SMTP est configuré.
+This is a demonstration project: no real payment is taken. Transactions, refunds and tickets are
+recorded in the local database. Only the confirmation email really goes out, and only when an SMTP
+account is configured.

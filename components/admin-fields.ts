@@ -2,8 +2,6 @@ import type { FieldSpec } from './entity-form';
 import type { Aircraft, Airline, AirportWithCountry, Country } from '@/lib/types';
 import { CABIN_LABELS, FLIGHT_STATUS_LABELS, type FlightStatus } from '@/lib/types';
 
-/** Field specs for the administration forms, kept next to each other for consistency. */
-
 export function flightFields(
   airlines: Airline[],
   aircraft: Aircraft[],
@@ -18,15 +16,15 @@ export function flightFields(
     {
       kind: 'text',
       name: 'flight_number',
-      label: 'Numéro de vol',
+      label: 'Flight number',
       required: true,
       placeholder: 'AF1234',
-      hint: 'Code compagnie suivi de 1 à 4 chiffres.',
+      hint: 'Airline code followed by 1 to 4 digits.',
     },
     {
       kind: 'select',
       name: 'airline_id',
-      label: 'Compagnie',
+      label: 'Airline',
       required: true,
       options: airlines.map((airline) => ({
         value: airline.id,
@@ -36,38 +34,38 @@ export function flightFields(
     {
       kind: 'select',
       name: 'aircraft_id',
-      label: 'Appareil',
+      label: 'Aircraft',
       required: true,
       options: aircraft.map((plane) => ({
         value: plane.id,
-        label: `${plane.manufacturer} ${plane.model} — ${plane.capacity_economy}/${plane.capacity_business}/${plane.capacity_first} sièges`,
+        label: `${plane.manufacturer} ${plane.model} — ${plane.capacity_economy}/${plane.capacity_business}/${plane.capacity_first} seats`,
       })),
     },
     {
       kind: 'select',
       name: 'origin_id',
-      label: 'Aéroport de départ',
+      label: 'Origin airport',
       required: true,
       options: airportOptions,
     },
     {
       kind: 'select',
       name: 'destination_id',
-      label: "Aéroport d'arrivée",
+      label: 'Destination airport',
       required: true,
       options: airportOptions,
     },
     {
       kind: 'datetime-local',
       name: 'departure_time',
-      label: 'Départ (heure locale)',
+      label: 'Departure (local time)',
       required: true,
-      hint: 'La durée, la distance et l’heure d’arrivée sont calculées automatiquement.',
+      hint: 'Duration, distance and arrival time are calculated automatically.',
     },
     {
       kind: 'number',
       name: 'price_economy',
-      label: `Tarif ${CABIN_LABELS.economy.toLowerCase()} (€)`,
+      label: `${CABIN_LABELS.economy} fare (€)`,
       required: true,
       min: 0,
       step: 0.01,
@@ -75,7 +73,7 @@ export function flightFields(
     {
       kind: 'number',
       name: 'price_business',
-      label: `Tarif ${CABIN_LABELS.business.toLowerCase()} (€)`,
+      label: `${CABIN_LABELS.business} fare (€)`,
       required: true,
       min: 0,
       step: 0.01,
@@ -83,18 +81,18 @@ export function flightFields(
     {
       kind: 'number',
       name: 'price_first',
-      label: `Tarif ${CABIN_LABELS.first.toLowerCase()} (€)`,
+      label: `${CABIN_LABELS.first} fare (€)`,
       required: true,
       min: 0,
       step: 0.01,
     },
-    { kind: 'number', name: 'seats_economy', label: 'Places économiques', required: true, min: 0 },
-    { kind: 'number', name: 'seats_business', label: 'Places affaires', required: true, min: 0 },
-    { kind: 'number', name: 'seats_first', label: 'Places première', required: true, min: 0 },
+    { kind: 'number', name: 'seats_economy', label: 'Economy seats', required: true, min: 0 },
+    { kind: 'number', name: 'seats_business', label: 'Business seats', required: true, min: 0 },
+    { kind: 'number', name: 'seats_first', label: 'First class seats', required: true, min: 0 },
     {
       kind: 'number',
       name: 'baggage_kg',
-      label: 'Franchise bagage (kg)',
+      label: 'Baggage allowance (kg)',
       required: true,
       min: 0,
       max: 80,
@@ -102,7 +100,7 @@ export function flightFields(
     {
       kind: 'select',
       name: 'status',
-      label: 'Statut',
+      label: 'Status',
       required: true,
       options: (Object.keys(FLIGHT_STATUS_LABELS) as FlightStatus[]).map((status) => ({
         value: status,
@@ -114,31 +112,31 @@ export function flightFields(
 
 export function airportFields(countries: Country[]): FieldSpec[] {
   return [
-    { kind: 'text', name: 'iata', label: 'Code IATA', required: true, placeholder: 'CDG' },
-    { kind: 'text', name: 'icao', label: 'Code OACI', placeholder: 'LFPG' },
+    { kind: 'text', name: 'iata', label: 'IATA code', required: true, placeholder: 'CDG' },
+    { kind: 'text', name: 'icao', label: 'ICAO code', placeholder: 'LFPG' },
     {
       kind: 'text',
       name: 'name',
-      label: "Nom de l'aéroport",
+      label: 'Airport name',
       required: true,
       span: 2,
       placeholder: 'Paris-Charles de Gaulle',
     },
-    { kind: 'text', name: 'city', label: 'Ville', required: true },
+    { kind: 'text', name: 'city', label: 'City', required: true },
     {
       kind: 'select',
       name: 'country_id',
-      label: 'Pays',
+      label: 'Country',
       required: true,
       options: countries.map((country) => ({ value: country.id, label: country.name })),
     },
     {
       kind: 'text',
       name: 'timezone',
-      label: 'Fuseau horaire IANA',
+      label: 'IANA timezone',
       required: true,
       placeholder: 'Europe/Paris',
-      hint: 'Sert à calculer les heures locales de départ et d’arrivée.',
+      hint: 'Used to work out the local departure and arrival times.',
     },
     { kind: 'number', name: 'latitude', label: 'Latitude', required: true, step: 0.0001, min: -90, max: 90 },
     {
@@ -155,76 +153,76 @@ export function airportFields(countries: Country[]): FieldSpec[] {
 
 export function airlineFields(countries: Country[]): FieldSpec[] {
   return [
-    { kind: 'text', name: 'iata', label: 'Code IATA', required: true, placeholder: 'AF' },
-    { kind: 'text', name: 'name', label: 'Nom', required: true, span: 2 },
+    { kind: 'text', name: 'iata', label: 'IATA code', required: true, placeholder: 'AF' },
+    { kind: 'text', name: 'name', label: 'Name', required: true, span: 2 },
     {
       kind: 'select',
       name: 'country_id',
-      label: "Pays d'immatriculation",
+      label: 'Country of registration',
       required: true,
       options: countries.map((country) => ({ value: country.id, label: country.name })),
     },
     { kind: 'text', name: 'alliance', label: 'Alliance', placeholder: 'SkyTeam, Star Alliance…' },
-    { kind: 'checkbox', name: 'active', label: 'Compagnie active' },
+    { kind: 'checkbox', name: 'active', label: 'Active airline' },
   ];
 }
 
 export const aircraftFields: FieldSpec[] = [
-  { kind: 'text', name: 'code', label: 'Code interne', required: true, placeholder: 'A350' },
-  { kind: 'text', name: 'model', label: 'Modèle', required: true, placeholder: 'A350-900' },
-  { kind: 'text', name: 'manufacturer', label: 'Constructeur', required: true, placeholder: 'Airbus' },
-  { kind: 'number', name: 'capacity_economy', label: 'Sièges économiques', required: true, min: 0 },
-  { kind: 'number', name: 'capacity_business', label: 'Sièges affaires', required: true, min: 0 },
-  { kind: 'number', name: 'capacity_first', label: 'Sièges première', required: true, min: 0 },
-  { kind: 'number', name: 'range_km', label: "Rayon d'action (km)", required: true, min: 100 },
+  { kind: 'text', name: 'code', label: 'Internal code', required: true, placeholder: 'A350' },
+  { kind: 'text', name: 'model', label: 'Model', required: true, placeholder: 'A350-900' },
+  { kind: 'text', name: 'manufacturer', label: 'Manufacturer', required: true, placeholder: 'Airbus' },
+  { kind: 'number', name: 'capacity_economy', label: 'Economy seats', required: true, min: 0 },
+  { kind: 'number', name: 'capacity_business', label: 'Business seats', required: true, min: 0 },
+  { kind: 'number', name: 'capacity_first', label: 'First class seats', required: true, min: 0 },
+  { kind: 'number', name: 'range_km', label: 'Range (km)', required: true, min: 100 },
   {
     kind: 'number',
     name: 'cruise_speed_kmh',
-    label: 'Vitesse de croisière (km/h)',
+    label: 'Cruise speed (km/h)',
     required: true,
     min: 300,
   },
 ];
 
 export const countryFields: FieldSpec[] = [
-  { kind: 'text', name: 'code', label: 'Code ISO', required: true, placeholder: 'FR' },
-  { kind: 'text', name: 'name', label: 'Nom', required: true },
+  { kind: 'text', name: 'code', label: 'ISO code', required: true, placeholder: 'FR' },
+  { kind: 'text', name: 'name', label: 'Name', required: true },
   { kind: 'text', name: 'continent', label: 'Continent', required: true, placeholder: 'Europe' },
-  { kind: 'text', name: 'currency', label: 'Devise', required: true, placeholder: 'EUR' },
-  { kind: 'text', name: 'phone_code', label: 'Indicatif', required: true, placeholder: '+33' },
+  { kind: 'text', name: 'currency', label: 'Currency', required: true, placeholder: 'EUR' },
+  { kind: 'text', name: 'phone_code', label: 'Dialling code', required: true, placeholder: '+33' },
   {
     kind: 'textarea',
     name: 'visa_note',
-    label: "Formalités d'entrée",
+    label: 'Entry requirements',
     span: 3,
-    placeholder: 'Visa, durée de séjour autorisée, validité du passeport…',
+    placeholder: 'Visa, permitted length of stay, passport validity…',
   },
 ];
 
 export function userFields(withPassword: boolean): FieldSpec[] {
   const base: FieldSpec[] = [
-    { kind: 'text', name: 'first_name', label: 'Prénom', required: true },
-    { kind: 'text', name: 'last_name', label: 'Nom', required: true },
-    { kind: 'email', name: 'email', label: 'Adresse e-mail', required: true },
-    { kind: 'text', name: 'phone', label: 'Téléphone' },
+    { kind: 'text', name: 'first_name', label: 'First name', required: true },
+    { kind: 'text', name: 'last_name', label: 'Last name', required: true },
+    { kind: 'email', name: 'email', label: 'Email address', required: true },
+    { kind: 'text', name: 'phone', label: 'Phone' },
     {
       kind: 'select',
       name: 'role',
-      label: 'Rôle',
+      label: 'Role',
       required: true,
       options: [
-        { value: 'user', label: 'Client' },
-        { value: 'admin', label: 'Administrateur' },
+        { value: 'user', label: 'Customer' },
+        { value: 'admin', label: 'Administrator' },
       ],
     },
     {
       kind: 'select',
       name: 'status',
-      label: 'Statut',
+      label: 'Status',
       required: true,
       options: [
-        { value: 'active', label: 'Actif' },
-        { value: 'suspended', label: 'Suspendu' },
+        { value: 'active', label: 'Active' },
+        { value: 'suspended', label: 'Suspended' },
       ],
     },
   ];
@@ -233,9 +231,9 @@ export function userFields(withPassword: boolean): FieldSpec[] {
     base.push({
       kind: 'password',
       name: 'password',
-      label: 'Mot de passe',
+      label: 'Password',
       required: true,
-      hint: 'Au moins 8 caractères, dont une lettre et un chiffre.',
+      hint: 'At least 12 characters, including a lowercase letter, an uppercase letter and a digit.',
     });
   }
 

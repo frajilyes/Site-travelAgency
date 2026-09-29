@@ -6,7 +6,7 @@ import { listAuditLogs } from '@/lib/queries/users';
 import { formatDateTime, formatPrice } from '@/lib/format';
 
 export const metadata: Metadata = {
-  title: 'Tableau de bord',
+  title: 'Dashboard',
 };
 
 export default async function AdminDashboardPage() {
@@ -24,43 +24,43 @@ export default async function AdminDashboardPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Tableau de bord"
-        subtitle="Activité commerciale, remplissage et dernières opérations."
+        title="Dashboard"
+        subtitle="Commercial activity, load factor and the latest operations."
         action={
-          <Link href="/admin/vols/nouveau" className="btn btn-primary">
-            Programmer un vol
+          <Link href="/admin/flights/new" className="btn btn-primary">
+            Schedule a flight
           </Link>
         }
       />
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard
-          label="Chiffre d'affaires"
+          label="Revenue"
           value={formatPrice(stats.revenue)}
-          hint={`Panier moyen ${formatPrice(stats.averageBasket)}`}
+          hint={`Average basket ${formatPrice(stats.averageBasket)}`}
         />
         <StatCard
-          label="Réservations"
-          value={stats.bookings.toLocaleString('fr-FR')}
-          hint={`${stats.confirmed} confirmées · ${stats.cancelled} annulées`}
+          label="Bookings"
+          value={stats.bookings.toLocaleString('en-GB')}
+          hint={`${stats.confirmed} confirmed · ${stats.cancelled} cancelled`}
         />
         <StatCard
-          label="Passagers transportés"
-          value={stats.passengers.toLocaleString('fr-FR')}
-          hint="Hors réservations annulées"
+          label="Passengers carried"
+          value={stats.passengers.toLocaleString('en-GB')}
+          hint="Excluding cancelled bookings"
         />
         <StatCard
-          label="Vols à venir"
-          value={stats.upcomingFlights.toLocaleString('fr-FR')}
-          hint={`${stats.flights.toLocaleString('fr-FR')} vols au total`}
+          label="Upcoming flights"
+          value={stats.upcomingFlights.toLocaleString('en-GB')}
+          hint={`${stats.flights.toLocaleString('en-GB')} flights in total`}
         />
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2">
         <section className="card p-5">
-          <h2 className="text-lg font-semibold">Chiffre d’affaires par mois</h2>
+          <h2 className="text-lg font-semibold">Revenue by month</h2>
           {months.length === 0 ? (
-            <p className="mt-4 text-sm text-ink-muted">Aucune réservation enregistrée.</p>
+            <p className="mt-4 text-sm text-ink-muted">No bookings recorded.</p>
           ) : (
             <ul className="mt-4 space-y-3">
               {months.map((month) => (
@@ -68,7 +68,7 @@ export default async function AdminDashboardPage() {
                   <div className="flex items-center justify-between text-sm">
                     <span className="font-medium">{month.month}</span>
                     <span className="tabular-nums text-ink-muted">
-                      {formatPrice(month.total)} · {month.bookings} dossier
+                      {formatPrice(month.total)} · {month.bookings} booking
                       {month.bookings > 1 ? 's' : ''}
                     </span>
                   </div>
@@ -85,9 +85,9 @@ export default async function AdminDashboardPage() {
         </section>
 
         <section className="card p-5">
-          <h2 className="text-lg font-semibold">Lignes les plus réservées</h2>
+          <h2 className="text-lg font-semibold">Most booked routes</h2>
           {routes.length === 0 ? (
-            <p className="mt-4 text-sm text-ink-muted">Aucune ligne réservée pour l’instant.</p>
+            <p className="mt-4 text-sm text-ink-muted">No route booked yet.</p>
           ) : (
             <ul className="mt-4 space-y-3">
               {routes.map((route) => (
@@ -115,9 +115,9 @@ export default async function AdminDashboardPage() {
 
       <section>
         <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold">Dernières réservations</h2>
-          <Link href="/admin/reservations" className="text-sm font-medium text-brand-600 hover:underline">
-            Tout voir
+          <h2 className="text-lg font-semibold">Latest bookings</h2>
+          <Link href="/admin/bookings" className="text-sm font-medium text-brand-600 hover:underline">
+            View all
           </Link>
         </div>
 
@@ -125,19 +125,19 @@ export default async function AdminDashboardPage() {
           <table className="table">
             <thead>
               <tr>
-                <th>Référence</th>
-                <th>Client</th>
-                <th>Trajet</th>
-                <th>Départ</th>
-                <th>Statut</th>
-                <th className="text-right">Montant</th>
+                <th>Reference</th>
+                <th>Customer</th>
+                <th>Route</th>
+                <th>Departure</th>
+                <th>Status</th>
+                <th className="text-right">Amount</th>
               </tr>
             </thead>
             <tbody>
               {recent.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="text-center text-ink-muted">
-                    Aucune réservation.
+                    No bookings.
                   </td>
                 </tr>
               ) : (
@@ -145,7 +145,7 @@ export default async function AdminDashboardPage() {
                   <tr key={booking.id}>
                     <td>
                       <Link
-                        href={`/reservation/${booking.reference}`}
+                        href={`/booking/${booking.reference}`}
                         className="font-mono font-semibold text-brand-600 hover:underline"
                       >
                         {booking.reference}
@@ -173,9 +173,9 @@ export default async function AdminDashboardPage() {
 
       <section className="card p-5">
         <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold">Dernières opérations</h2>
-          <Link href="/admin/journal" className="text-sm font-medium text-brand-600 hover:underline">
-            Journal complet
+          <h2 className="text-lg font-semibold">Latest operations</h2>
+          <Link href="/admin/audit" className="text-sm font-medium text-brand-600 hover:underline">
+            Full audit log
           </Link>
         </div>
         <ul className="mt-3 space-y-2 text-sm">
@@ -186,7 +186,7 @@ export default async function AdminDashboardPage() {
                 <span className="text-ink-muted">{log.details}</span>
               </span>
               <span className="text-xs text-ink-muted">
-                {log.actor ?? 'Système'} · {formatDateTime(log.created_at)}
+                {log.actor ?? 'System'} · {formatDateTime(log.created_at)}
               </span>
             </li>
           ))}

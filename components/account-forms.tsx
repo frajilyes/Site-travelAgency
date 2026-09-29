@@ -11,7 +11,7 @@ function Submit({ label }: { label: string }) {
   const { pending } = useFormStatus();
   return (
     <button type="submit" className="btn btn-primary" disabled={pending}>
-      {pending ? 'Enregistrement…' : label}
+      {pending ? 'Saving…' : label}
     </button>
   );
 }
@@ -43,14 +43,14 @@ export function ProfileForm({ user }: { user: PublicUser }) {
       <div className="grid gap-4 sm:grid-cols-2">
         <div>
           <label className="label" htmlFor="first_name">
-            Prénom
+            First name
           </label>
           <input id="first_name" className="field" name="first_name" defaultValue={user.first_name} required />
           <FieldError messages={errors.first_name} />
         </div>
         <div>
           <label className="label" htmlFor="last_name">
-            Nom
+            Last name
           </label>
           <input id="last_name" className="field" name="last_name" defaultValue={user.last_name} required />
           <FieldError messages={errors.last_name} />
@@ -59,7 +59,7 @@ export function ProfileForm({ user }: { user: PublicUser }) {
 
       <div>
         <label className="label" htmlFor="email">
-          Adresse e-mail
+          Email address
         </label>
         <input id="email" className="field" type="email" name="email" defaultValue={user.email} required />
         <FieldError messages={errors.email} />
@@ -67,13 +67,13 @@ export function ProfileForm({ user }: { user: PublicUser }) {
 
       <div>
         <label className="label" htmlFor="phone">
-          Téléphone
+          Phone
         </label>
         <input id="phone" className="field" name="phone" defaultValue={user.phone ?? ''} />
         <FieldError messages={errors.phone} />
       </div>
 
-      <Submit label="Enregistrer" />
+      <Submit label="Save" />
     </form>
   );
 }
@@ -88,7 +88,7 @@ export function PasswordForm() {
 
       <div>
         <label className="label" htmlFor="current">
-          Mot de passe actuel
+          Current password
         </label>
         <input
           id="current"
@@ -104,7 +104,7 @@ export function PasswordForm() {
       <div className="grid gap-4 sm:grid-cols-2">
         <div>
           <label className="label" htmlFor="new-password">
-            Nouveau mot de passe
+            New password
           </label>
           <input
             id="new-password"
@@ -118,7 +118,7 @@ export function PasswordForm() {
         </div>
         <div>
           <label className="label" htmlFor="confirm">
-            Confirmation
+            Confirm password
           </label>
           <input
             id="confirm"
@@ -132,7 +132,7 @@ export function PasswordForm() {
         </div>
       </div>
 
-      <Submit label="Modifier le mot de passe" />
+      <Submit label="Change password" />
     </form>
   );
 }

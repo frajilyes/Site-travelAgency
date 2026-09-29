@@ -1,12 +1,9 @@
 import type { CabinClass, PassengerType } from './types';
 import { parseSqlUtc, priceForClass } from './format';
 
-/** VAT and carrier surcharges applied on top of the fare. */
 export const TAX_RATE = 0.12;
-/** Airport fee charged per passenger and per flight segment. */
 export const AIRPORT_FEE = 22;
 
-/** Fare share paid per passenger category. Infants travel on an adult's lap. */
 export const FARE_MULTIPLIER: Record<PassengerType, number> = {
   adult: 1,
   child: 0.75,
@@ -34,15 +31,10 @@ export function totalPassengers(mix: PassengerMix): number {
   return mix.adult + mix.child + mix.infant;
 }
 
-/** Infants do not occupy a seat, so they are not counted against availability. */
 export function seatsNeeded(mix: PassengerMix): number {
   return mix.adult + mix.child;
 }
 
-/**
- * Price a trip: every passenger pays a share of each segment's fare, then taxes
- * and per-segment airport fees are added.
- */
 export function computeQuote(
   outbound: Priced,
   returnFlight: Priced | null,
@@ -73,10 +65,6 @@ export function computeQuote(
   };
 }
 
-/**
- * Refund policy applied on cancellation: full refund more than 7 days before
- * departure, 50% between 7 days and 24 hours, nothing after that.
- */
 export function refundRate(departureUtc: string, now: Date = new Date()): number {
   const departure = parseSqlUtc(departureUtc).getTime();
   const hours = (departure - now.getTime()) / 3_600_000;
@@ -97,7 +85,6 @@ const LETTERS: Record<CabinClass, string[]> = {
 
 const FIRST_ROW: Record<CabinClass, number> = { first: 1, business: 4, economy: 13 };
 
-/** Turn a zero-based seat index into a cabin-appropriate seat label such as `14C`. */
 export function seatLabel(cabin: CabinClass, index: number): string {
   const letters = LETTERS[cabin];
   const row = FIRST_ROW[cabin] + Math.floor(index / letters.length);

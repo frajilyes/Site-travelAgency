@@ -96,7 +96,6 @@ export function StatCard({
   );
 }
 
-/** Link-based pagination that preserves the current query string. */
 export function Pagination({
   page,
   perPage,
@@ -125,23 +124,23 @@ export function Pagination({
   return (
     <nav className="flex items-center justify-between gap-4 text-sm" aria-label="Pagination">
       <p className="text-ink-muted">
-        Page {page} sur {pages} — {total.toLocaleString('fr-FR')} résultat
+        Page {page} of {pages} — {total.toLocaleString('en-GB')} result
         {total > 1 ? 's' : ''}
       </p>
       <div className="flex gap-2">
         {page > 1 ? (
           <Link className="btn btn-ghost" href={href(page - 1)}>
-            Précédent
+            Previous
           </Link>
         ) : (
-          <span className="btn btn-ghost opacity-40">Précédent</span>
+          <span className="btn btn-ghost opacity-40">Previous</span>
         )}
         {page < pages ? (
           <Link className="btn btn-ghost" href={href(page + 1)}>
-            Suivant
+            Next
           </Link>
         ) : (
-          <span className="btn btn-ghost opacity-40">Suivant</span>
+          <span className="btn btn-ghost opacity-40">Next</span>
         )}
       </div>
     </nav>

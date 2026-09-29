@@ -16,7 +16,6 @@ export interface SearchDefaults {
   infants?: number;
 }
 
-/** The flight search form, used on the home page and above the results list. */
 export function SearchForm({
   defaults,
   compact = false,
@@ -39,23 +38,23 @@ export function SearchForm({
     const to = String(data.get('to') ?? '');
 
     if (!from || !to) {
-      setError('Sélectionnez un aéroport de départ et un aéroport d’arrivée dans la liste.');
+      setError('Pick a departure airport and a destination airport from the list.');
       return;
     }
     if (from === to) {
-      setError('Le départ et la destination doivent être différents.');
+      setError('Departure and destination must be different.');
       return;
     }
 
-    const adults = Number(data.get('adultes') ?? 1);
-    const kids = Number(data.get('enfants') ?? 0);
-    const infants = Number(data.get('bebes') ?? 0);
+    const adults = Number(data.get('adults') ?? 1);
+    const kids = Number(data.get('children') ?? 0);
+    const infants = Number(data.get('infants') ?? 0);
     if (adults + kids + infants > 9) {
-      setError('Neuf passagers maximum par réservation.');
+      setError('Nine passengers maximum per booking.');
       return;
     }
     if (infants > adults) {
-      setError('Chaque bébé doit voyager avec un adulte.');
+      setError('Each infant must travel with an adult.');
       return;
     }
 
@@ -63,15 +62,15 @@ export function SearchForm({
       from,
       to,
       date: String(data.get('date') ?? today),
-      cabine: String(data.get('cabine') ?? 'economy'),
-      adultes: String(adults),
-      enfants: String(kids),
-      bebes: String(infants),
+      cabin: String(data.get('cabin') ?? 'economy'),
+      adults: String(adults),
+      children: String(kids),
+      infants: String(infants),
     });
-    if (roundTrip && back) query.set('retour', back);
+    if (roundTrip && back) query.set('return', back);
 
     setError(null);
-    router.push(`/vols?${query.toString()}`);
+    router.push(`/flights?${query.toString()}`);
   }
 
   return (
@@ -83,7 +82,7 @@ export function SearchForm({
           className={`btn ${roundTrip ? 'btn-ghost' : 'btn-primary'}`}
           aria-pressed={!roundTrip}
         >
-          Aller simple
+          One way
         </button>
         <button
           type="button"
@@ -91,19 +90,19 @@ export function SearchForm({
           className={`btn ${roundTrip ? 'btn-primary' : 'btn-ghost'}`}
           aria-pressed={roundTrip}
         >
-          Aller-retour
+          Round trip
         </button>
       </div>
 
       <div className="grid gap-4 md:grid-cols-2">
-        <AirportPicker name="from" label="Départ" defaultOption={defaults?.from} />
-        <AirportPicker name="to" label="Destination" defaultOption={defaults?.to} />
+        <AirportPicker name="from" label="From" defaultOption={defaults?.from} />
+        <AirportPicker name="to" label="To" defaultOption={defaults?.to} />
       </div>
 
       <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <div>
           <label className="label" htmlFor="search-date">
-            Date d’aller
+            Departure date
           </label>
           <input
             id="search-date"
@@ -122,13 +121,13 @@ export function SearchForm({
 
         <div>
           <label className="label" htmlFor="search-back">
-            Date de retour
+            Return date
           </label>
           <input
             id="search-back"
             className="field"
             type="date"
-            name="retour"
+            name="return"
             min={date}
             value={back}
             disabled={!roundTrip}
@@ -139,9 +138,9 @@ export function SearchForm({
 
         <div>
           <label className="label" htmlFor="search-cabin">
-            Classe
+            Cabin
           </label>
-          <select id="search-cabin" className="field" name="cabine" defaultValue={defaults?.cabin ?? 'economy'}>
+          <select id="search-cabin" className="field" name="cabin" defaultValue={defaults?.cabin ?? 'economy'}>
             {CABIN_CLASSES.map((cabin) => (
               <option key={cabin} value={cabin}>
                 {CABIN_LABELS[cabin]}
@@ -153,12 +152,12 @@ export function SearchForm({
         <div className="grid grid-cols-3 gap-2">
           <div>
             <label className="label" htmlFor="search-adults">
-              Adultes
+              Adults
             </label>
             <select
               id="search-adults"
               className="field"
-              name="adultes"
+              name="adults"
               defaultValue={String(defaults?.adults ?? 1)}
             >
               {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => (
@@ -170,12 +169,12 @@ export function SearchForm({
           </div>
           <div>
             <label className="label" htmlFor="search-children">
-              Enfants
+              Children
             </label>
             <select
               id="search-children"
               className="field"
-              name="enfants"
+              name="children"
               defaultValue={String(defaults?.children ?? 0)}
             >
               {[0, 1, 2, 3, 4, 5, 6, 7, 8].map((n) => (
@@ -187,12 +186,12 @@ export function SearchForm({
           </div>
           <div>
             <label className="label" htmlFor="search-infants">
-              Bébés
+              Infants
             </label>
             <select
               id="search-infants"
               className="field"
-              name="bebes"
+              name="infants"
               defaultValue={String(defaults?.infants ?? 0)}
             >
               {[0, 1, 2, 3, 4].map((n) => (
@@ -212,7 +211,7 @@ export function SearchForm({
       ) : null}
 
       <button type="submit" className="btn btn-primary mt-4 w-full sm:w-auto">
-        Rechercher des vols
+        Search flights
       </button>
     </form>
   );

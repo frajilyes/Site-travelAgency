@@ -1,23 +1,11 @@
 import 'server-only';
-import type { Document } from 'mongodb';
-import {
-  AS_ENTITY,
-  airportsCol,
-  bookingsCol,
-  flightsCol,
-  literal,
-  nextId,
-  now,
-} from '../mongodb';
+import { literal, now, pipeline, type Stage } from '../db';
+import { AirportModel } from '../models/reference';
+import { BookingModel } from '../models/bookings';
+import { FlightModel } from '../models/flights';
 import type { CabinClass, Flight, FlightDetail, FlightStatus } from '../types';
 
-/**
- * Resolves the airline, the aircraft, both airports and their countries —
- * the six JOINs the SQL version carried on every flight query. Always applied
- * *after* the matching and pagination stages, so only the returned flights are
- * joined.
- */
-const FLIGHT_DETAIL: Document[] = [
+const FLIGHT_DETAIL: Stage[] = [
   { $lookup: { from: 'airlines', localField: 'airline_id', foreignField: '_id', as: 'al' } },
   { $lookup: { from: 'aircraft', localField: 'aircraft_id', foreignField: '_id', as: 'ac' } },
   { $lookup: { from: 'airports', localField: 'origin_id', foreignField: '_id', as: 'o' } },
@@ -47,11 +35,12 @@ const FLIGHT_DETAIL: Document[] = [
     },
   },
   { $unset: ['al', 'ac', 'o', 'd', 'oc', 'dc'] },
+  { $set: { id: '$_id' } },
+  { $unset: '_id' },
 ];
 
-async function detailed(stages: Document[]): Promise<FlightDetail[]> {
-  const flights = await flightsCol();
-  return flights.aggregate<FlightDetail>([...stages, ...FLIGHT_DETAIL, ...AS_ENTITY]).toArray();
+async function detailed(stages: Stage[]): Promise<FlightDetail[]> {
+  return FlightModel.aggregate<FlightDetail>(pipeline([...stages, ...FLIGHT_DETAIL]));
 }
 
 export interface SearchCriteria {
@@ -65,16 +54,12 @@ export interface SearchCriteria {
   sort?: 'price' | 'duration' | 'departure';
 }
 
-/**
- * Flights leaving `originId` on `date` (local to the departure airport) with
- * enough seats left in the requested cabin.
- */
 export async function searchFlights(criteria: SearchCriteria): Promise<FlightDetail[]> {
   const { cabin, seats, sort = 'price' } = criteria;
   const seatField = `seats_${cabin}`;
   const priceField = `price_${cabin}`;
 
-  const filter: Document = {
+  const filter: Stage = {
     origin_id: criteria.originId,
     destination_id: criteria.destinationId,
     departure_time: { $gte: `${criteria.date}T00:00`, $lte: `${criteria.date}T23:59` },
@@ -86,7 +71,7 @@ export async function searchFlights(criteria: SearchCriteria): Promise<FlightDet
   if (criteria.airlineId) filter.airline_id = criteria.airlineId;
   if (criteria.maxPrice !== undefined) filter[priceField] = { $lte: criteria.maxPrice };
 
-  const order: Document =
+  const order: Record<string, 1> =
     sort === 'duration'
       ? { duration_minutes: 1 }
       : sort === 'departure'
@@ -101,7 +86,6 @@ export async function getFlight(id: number): Promise<FlightDetail | undefined> {
   return flight;
 }
 
-/** Cheapest fare per day around `date`, used by the flexible-dates strip. */
 export async function priceCalendar(
   originId: number,
   destinationId: number,
@@ -114,9 +98,8 @@ export async function priceCalendar(
   const to = new Date(`${date}T12:00:00Z`);
   to.setUTCDate(to.getUTCDate() + span);
 
-  const flights = await flightsCol();
-  const rows = await flights
-    .aggregate<{ _id: string; price: number }>([
+  const rows = await FlightModel.aggregate<{ _id: string; price: number }>(
+    pipeline([
       {
         $match: {
           origin_id: originId,
@@ -137,8 +120,8 @@ export async function priceCalendar(
         },
       },
       { $sort: { _id: 1 } },
-    ])
-    .toArray();
+    ]),
+  );
 
   return rows.map((row) => ({ date: row._id, price: row.price }));
 }
@@ -152,18 +135,17 @@ export interface PopularDestination {
   price: number;
 }
 
-/** Popular destinations shown on the home page, with their entry price. */
 export async function popularDestinations(
   originIata = 'CDG',
   limit = 8,
 ): Promise<PopularDestination[]> {
-  const airports = await airportsCol();
-  const origin = await airports.findOne({ iata: originIata.toUpperCase() });
+  const origin = await AirportModel.findOne({ iata: originIata.toUpperCase() }).lean<{
+    _id: number;
+  } | null>();
   if (!origin) return [];
 
-  const flights = await flightsCol();
-  return flights
-    .aggregate<PopularDestination>([
+  return FlightModel.aggregate<PopularDestination>(
+    pipeline([
       {
         $match: {
           origin_id: origin._id,
@@ -190,19 +172,14 @@ export async function popularDestinations(
           price: 1,
         },
       },
-    ])
-    .toArray();
+    ]),
+  );
 }
 
-/**
- * The two figures the home page shows. Kept apart from `dashboardStats`, which
- * aggregates the whole bookings collection for numbers the page never reads.
- */
 export async function flightCounts(): Promise<{ total: number; upcoming: number }> {
-  const flights = await flightsCol();
   const [total, upcoming] = await Promise.all([
-    flights.estimatedDocumentCount(),
-    flights.countDocuments({ departure_utc: { $gt: now() }, status: 'scheduled' }),
+    FlightModel.estimatedDocumentCount(),
+    FlightModel.countDocuments({ departure_utc: { $gt: now() }, status: 'scheduled' }),
   ]);
   return { total, upcoming };
 }
@@ -219,20 +196,17 @@ export interface FlightFilter {
   perPage?: number;
 }
 
-/** Paginated flight list for the administration area. */
 export async function listFlights(
   filter: FlightFilter,
 ): Promise<{ rows: FlightDetail[]; total: number }> {
-  const query: Document = {};
+  const query: Stage = {};
 
   if (filter.search) {
     const like = literal(filter.search);
-    // The old query searched the joined airports too. Resolving the matching
-    // airports first keeps the flight scan on indexed fields.
-    const airports = await airportsCol();
-    const matched = await airports
-      .find({ $or: [{ iata: like }, { city: like }] }, { projection: { _id: 1 } })
-      .toArray();
+    const matched = await AirportModel.find(
+      { $or: [{ iata: like }, { city: like }] },
+      { _id: 1 },
+    ).lean<{ _id: number }[]>();
     const airportIds = matched.map((airport) => airport._id);
     query.$or = [
       { flight_number: like },
@@ -254,9 +228,8 @@ export async function listFlights(
   const perPage = filter.perPage ?? 25;
   const page = Math.max(1, filter.page ?? 1);
 
-  const flights = await flightsCol();
   const [total, rows] = await Promise.all([
-    flights.countDocuments(query),
+    FlightModel.countDocuments(query),
     detailed([
       { $match: query },
       { $sort: { departure_time: 1 } },
@@ -290,34 +263,27 @@ export interface FlightInput {
 }
 
 export async function createFlight(input: FlightInput): Promise<number> {
-  const flights = await flightsCol();
-  const id = await nextId('flights');
-  await flights.insertOne({ _id: id, ...input, created_at: now() });
-  return id;
+  const created = await FlightModel.create({ ...input, created_at: now() });
+  return created._id;
 }
 
 export async function updateFlight(id: number, input: FlightInput): Promise<void> {
-  const flights = await flightsCol();
-  await flights.updateOne({ _id: id }, { $set: input });
+  await FlightModel.updateOne({ _id: id }, { $set: input });
 }
 
 export async function setFlightStatus(id: number, status: FlightStatus): Promise<void> {
-  const flights = await flightsCol();
-  await flights.updateOne({ _id: id }, { $set: { status } });
+  await FlightModel.updateOne({ _id: id }, { $set: { status } });
 }
 
-/** Number of active bookings that reference this flight. */
 export async function flightBookingCount(id: number): Promise<number> {
-  const bookings = await bookingsCol();
-  return bookings.countDocuments({
+  return BookingModel.countDocuments({
     $or: [{ outbound_flight_id: id }, { return_flight_id: id }],
     status: { $ne: 'cancelled' },
   });
 }
 
 export async function deleteFlight(id: number): Promise<void> {
-  const flights = await flightsCol();
-  await flights.deleteOne({ _id: id });
+  await FlightModel.deleteOne({ _id: id });
 }
 
 export interface CountryFare {
@@ -329,22 +295,21 @@ export interface CountryFare {
   departure_time: string;
 }
 
-/** Cheapest upcoming flight from `originIata` to each airport of a country. */
 export async function cheapestToCountry(
   countryId: number,
   originIata = 'CDG',
 ): Promise<CountryFare[]> {
-  const airports = await airportsCol();
   const [origin, destinations] = await Promise.all([
-    airports.findOne({ iata: originIata.toUpperCase() }),
-    airports.find({ country_id: countryId }).toArray(),
+    AirportModel.findOne({ iata: originIata.toUpperCase() }).lean<{ _id: number } | null>(),
+    AirportModel.find({ country_id: countryId }).lean<
+      { _id: number; iata: string; city: string; name: string }[]
+    >(),
   ]);
   if (!origin || destinations.length === 0) return [];
 
   const byId = new Map(destinations.map((airport) => [airport._id, airport]));
-  const flights = await flightsCol();
-  const rows = await flights
-    .aggregate<{ _id: number; price: number; departure_time: string }>([
+  const rows = await FlightModel.aggregate<{ _id: number; price: number; departure_time: string }>(
+    pipeline([
       {
         $match: {
           origin_id: origin._id,
@@ -362,8 +327,8 @@ export async function cheapestToCountry(
         },
       },
       { $sort: { price: 1 } },
-    ])
-    .toArray();
+    ]),
+  );
 
   return rows.map((row) => {
     const airport = byId.get(row._id)!;
@@ -378,19 +343,16 @@ export async function cheapestToCountry(
   });
 }
 
-/** Airlines operating at least one flight to a country, for its destination page. */
 export async function airlinesServingCountry(
   countryId: number,
 ): Promise<{ name: string; iata: string; flights: number }[]> {
-  const airports = await airportsCol();
-  const destinations = await airports
-    .find({ country_id: countryId }, { projection: { _id: 1 } })
-    .toArray();
+  const destinations = await AirportModel.find({ country_id: countryId }, { _id: 1 }).lean<
+    { _id: number }[]
+  >();
   if (destinations.length === 0) return [];
 
-  const flights = await flightsCol();
-  return flights
-    .aggregate<{ name: string; iata: string; flights: number }>([
+  return FlightModel.aggregate<{ name: string; iata: string; flights: number }>(
+    pipeline([
       {
         $match: {
           destination_id: { $in: destinations.map((airport) => airport._id) },
@@ -403,8 +365,8 @@ export async function airlinesServingCountry(
       { $lookup: { from: 'airlines', localField: '_id', foreignField: '_id', as: 'al' } },
       { $unwind: '$al' },
       { $project: { _id: 0, name: '$al.name', iata: '$al.iata', flights: 1 } },
-    ])
-    .toArray();
+    ]),
+  );
 }
 
 export type { Flight };

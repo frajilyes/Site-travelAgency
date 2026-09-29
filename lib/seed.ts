@@ -1,34 +1,28 @@
 import 'server-only';
-import type { Collection, Document, Filter, OptionalUnlessRequiredId } from 'mongodb';
-import {
-  type Doc,
-  aircraftCol,
-  airlinesCol,
-  airportsCol,
-  auditLogsCol,
-  bookingsCol,
-  countriesCol,
-  ensureIndexes,
-  flightsCol,
-  nextId,
-  now,
-  passengersCol,
-  paymentsCol,
-  usersCol,
-} from './mongodb';
+import type { Model, QueryFilter } from 'mongoose';
+import { connectDB, nextId, now } from './db';
+import { env } from './env';
+import { ensureIndexes } from './models';
+import { backfillSessionVersions } from './queries/users';
+import { AircraftModel, AirlineModel, AirportModel, CountryModel } from './models/reference';
+import { AuditLogModel, UserModel } from './models/users';
+import { FlightModel } from './models/flights';
+import { BookingModel, PassengerModel, PaymentModel } from './models/bookings';
 import { AIRCRAFT, AIRLINES, AIRPORTS, COUNTRIES, NETWORK } from './seed-data';
 import { hashPassword } from './password';
 import { computeQuote, seatLabel } from './pricing';
 import { haversine, toSqlUtc, utcToZoned, zonedToUtc } from './geo';
 import type { Aircraft, Airline, Airport, CabinClass, Country } from './types';
 
-/** Days of schedule generated ahead of today. */
-const HORIZON_DAYS = Number(process.env.SEED_DAYS ?? 28);
+const HORIZON_DAYS = env.SEED_DAYS;
 
-/** Documents written per `insertMany` call while generating the schedule. */
+const DEMO_ACCOUNTS = [
+  { email: 'admin@skyroute.fr', password: 'Admin.SkyRoute2026', role: 'admin' as const },
+  { email: 'client@skyroute.fr', password: 'Client.SkyRoute2026', role: 'user' as const },
+];
+
 const BATCH = 5000;
 
-/** Deterministic PRNG so repeated seeds produce the same schedule. */
 function mulberry32(seed: number) {
   let a = seed >>> 0;
   return () => {
@@ -69,67 +63,52 @@ function economyFare(distance: number, daysAhead: number, weekday: number, airli
   return Math.round(base * weekend * advance * airlineFactor * 100) / 100;
 }
 
-/**
- * Insert the rows of a reference collection that are not there yet, keyed on a
- * natural code — the equivalent of the old `INSERT OR IGNORE`. Returns the
- * code → key map the schedule generator needs.
- */
 async function upsertReference<E extends { id: number }>(
-  collection: Collection<Doc<E>>,
+  model: Model<Omit<E, 'id'> & { _id: number }>,
   sequence: string,
   key: keyof Omit<E, 'id'> & string,
   rows: Omit<E, 'id'>[],
 ): Promise<Map<string, number>> {
   const codes = rows.map((row) => (row as Record<string, unknown>)[key]);
-  const existing = await collection
-    .find({ [key]: { $in: codes } } as Filter<Doc<E>>)
-    .toArray();
+  const existing = await model
+    .find({ [key]: { $in: codes } } as QueryFilter<Omit<E, 'id'> & { _id: number }>, { [key]: 1 })
+    .lean<({ _id: number } & Record<string, unknown>)[]>();
 
   const read = (row: unknown) => String((row as Record<string, unknown>)[key]);
-  const ids = new Map<string, number>(existing.map((row) => [read(row), row._id as number]));
+  const ids = new Map<string, number>(existing.map((row) => [read(row), row._id]));
 
   const missing = rows.filter((row) => !ids.has(read(row)));
   if (missing.length > 0) {
     const first = await nextId(sequence, missing.length);
     const documents = missing.map((row, index) => ({ _id: first + index, ...row }));
-    await collection.insertMany(documents as OptionalUnlessRequiredId<Doc<E>>[], { ordered: false });
+    await model.insertMany(documents, { ordered: false, lean: true });
     for (const document of documents) ids.set(read(document), document._id);
   }
   return ids;
 }
 
-/**
- * Fill an empty database with reference data and a flight schedule. Safe to
- * call repeatedly: it returns early when the data is already present.
- */
 export async function seedDatabase(): Promise<{ seeded: boolean; flights: number }> {
-  const [countries, airports, airlines, aircraft, flights] = await Promise.all([
-    countriesCol(),
-    airportsCol(),
-    airlinesCol(),
-    aircraftCol(),
-    flightsCol(),
-  ]);
+  await connectDB();
 
   const [countryCount, flightCount] = await Promise.all([
-    countries.countDocuments(),
-    flights.countDocuments(),
+    CountryModel.countDocuments(),
+    FlightModel.countDocuments(),
   ]);
   if (countryCount > 0 && flightCount > 0) {
     return { seeded: false, flights: flightCount };
   }
 
-  const countryIds = await upsertReference<Country>(countries, 'countries', 'code', [...COUNTRIES]);
+  const countryIds = await upsertReference<Country>(CountryModel, 'countries', 'code', [...COUNTRIES]);
 
   const airportIds = await upsertReference<Airport>(
-    airports,
+    AirportModel,
     'airports',
     'iata',
     AIRPORTS.map(({ country, ...rest }) => ({ ...rest, country_id: countryIds.get(country)! })),
   );
 
   const airlineIds = await upsertReference<Airline>(
-    airlines,
+    AirlineModel,
     'airlines',
     'iata',
     AIRLINES.map(({ country, ...rest }) => ({
@@ -139,26 +118,25 @@ export async function seedDatabase(): Promise<{ seeded: boolean; flights: number
     })),
   );
 
-  const aircraftIds = await upsertReference<Aircraft>(aircraft, 'aircraft', 'code', [...AIRCRAFT]);
+  const aircraftIds = await upsertReference<Aircraft>(AircraftModel, 'aircraft', 'code', [...AIRCRAFT]);
 
   const airportByIata = new Map(AIRPORTS.map((a) => [a.iata, a]));
   const startOfToday = new Date();
   startOfToday.setHours(0, 0, 0, 0);
 
   const timestamp = now();
-  let pending: Document[] = [];
+  let pending: Record<string, unknown>[] = [];
   let inserted = 0;
 
   const flush = async () => {
     if (pending.length === 0) return;
     const first = await nextId('flights', pending.length);
     try {
-      await flights.insertMany(
-        pending.map((flight, index) => ({ _id: first + index, ...flight })) as never[],
-        { ordered: false },
+      await FlightModel.insertMany(
+        pending.map((flight, index) => ({ _id: first + index, ...flight })),
+        { ordered: false, lean: true },
       );
     } catch (error) {
-      // Duplicate flight numbers are skipped, as `INSERT OR IGNORE` did.
       if ((error as { code?: number }).code !== 11000) throw error;
     }
     inserted += pending.length;
@@ -250,60 +228,54 @@ export async function seedDatabase(): Promise<{ seeded: boolean; flights: number
   return { seeded: true, flights: inserted };
 }
 
-/** Create the demo accounts and a couple of example bookings. */
 export async function seedAccounts(): Promise<void> {
-  const [users, countries, airports, flights, bookings, passengers, payments, auditLogs] =
-    await Promise.all([
-      usersCol(),
-      countriesCol(),
-      airportsCol(),
-      flightsCol(),
-      bookingsCol(),
-      passengersCol(),
-      paymentsCol(),
-      auditLogsCol(),
-    ]);
+  if (!env.SEED_DEMO_ACCOUNTS) return;
 
-  if ((await users.countDocuments()) > 0) return;
+  await connectDB();
+  if ((await UserModel.countDocuments()) > 0) return;
 
-  const [adminHash, clientHash] = await Promise.all([
-    hashPassword('Admin@2026'),
-    hashPassword('Client@2026'),
-  ]);
+  const [adminHash, clientHash] = await Promise.all(
+    DEMO_ACCOUNTS.map((account) => hashPassword(account.password)),
+  );
 
   const timestamp = now();
   const firstUserId = await nextId('users', 2);
-  await users.insertMany([
-    {
-      _id: firstUserId,
-      email: 'admin@skyroute.fr',
-      password_hash: adminHash,
-      google_id: null,
-      first_name: 'Sofia',
-      last_name: 'Marchetti',
-      phone: '+33 1 45 67 89 01',
-      role: 'admin',
-      status: 'active',
-      created_at: timestamp,
-      updated_at: timestamp,
-    },
-    {
-      _id: firstUserId + 1,
-      email: 'client@skyroute.fr',
-      password_hash: clientHash,
-      google_id: null,
-      first_name: 'Lucas',
-      last_name: 'Bernard',
-      phone: '+33 6 12 34 56 78',
-      role: 'user',
-      status: 'active',
-      created_at: timestamp,
-      updated_at: timestamp,
-    },
-  ]);
+  await UserModel.insertMany(
+    [
+      {
+        _id: firstUserId,
+        email: DEMO_ACCOUNTS[0].email,
+        password_hash: adminHash,
+        google_id: null,
+        first_name: 'Sofia',
+        last_name: 'Marchetti',
+        phone: '+33 1 45 67 89 01',
+        role: 'admin',
+        status: 'active',
+        session_version: 1,
+        created_at: timestamp,
+        updated_at: timestamp,
+      },
+      {
+        _id: firstUserId + 1,
+        email: DEMO_ACCOUNTS[1].email,
+        password_hash: clientHash,
+        google_id: null,
+        first_name: 'Lucas',
+        last_name: 'Bernard',
+        phone: '+33 6 12 34 56 78',
+        role: 'user',
+        status: 'active',
+        session_version: 1,
+        created_at: timestamp,
+        updated_at: timestamp,
+      },
+    ],
+    { lean: true },
+  );
 
   const clientId = firstUserId + 1;
-  const france = await countries.findOne({ code: 'FR' });
+  const france = await CountryModel.findOne({ code: 'FR' }).lean<{ _id: number } | null>();
   if (!france) return;
 
   const samples: { from: string; to: string; cabin: CabinClass }[] = [
@@ -314,15 +286,26 @@ export async function seedAccounts(): Promise<void> {
 
   for (const [index, sample] of samples.entries()) {
     const [origin, destination] = await Promise.all([
-      airports.findOne({ iata: sample.from }),
-      airports.findOne({ iata: sample.to }),
+      AirportModel.findOne({ iata: sample.from }).lean<{ _id: number } | null>(),
+      AirportModel.findOne({ iata: sample.to }).lean<{ _id: number } | null>(),
     ]);
     if (!origin || !destination) continue;
 
-    const flight = await flights.findOne(
-      { origin_id: origin._id, destination_id: destination._id, status: 'scheduled' },
-      { sort: { departure_utc: 1 } },
-    );
+    const flight = await FlightModel.findOne({
+      origin_id: origin._id,
+      destination_id: destination._id,
+      status: 'scheduled',
+    })
+      .sort({ departure_utc: 1 })
+      .lean<{
+      _id: number;
+      price_economy: number;
+      price_business: number;
+      price_first: number;
+      seats_economy: number;
+      seats_business: number;
+      seats_first: number;
+    } | null>();
     if (!flight) continue;
 
     const mix = { adult: index === 1 ? 1 : 2, child: 0, infant: 0 };
@@ -330,7 +313,7 @@ export async function seedAccounts(): Promise<void> {
     const reference = `SKY${String(100000 + index * 4211).slice(0, 6)}`;
     const bookingId = await nextId('bookings');
 
-    await bookings.insertOne({
+    await BookingModel.create({
       _id: bookingId,
       reference,
       user_id: clientId,
@@ -355,7 +338,7 @@ export async function seedAccounts(): Promise<void> {
     ] as const;
 
     const firstPassengerId = await nextId('passengers', mix.adult);
-    await passengers.insertMany(
+    await PassengerModel.insertMany(
       Array.from({ length: mix.adult }, (_, p) => {
         const [first, last, dob, gender] = names[p % names.length];
         return {
@@ -373,16 +356,16 @@ export async function seedAccounts(): Promise<void> {
           seat_return: null,
         };
       }),
+      { lean: true },
     );
 
     const seatField = `seats_${sample.cabin}`;
-    await flights.updateOne(
+    await FlightModel.updateOne(
       { _id: flight._id, [seatField]: { $gte: mix.adult } },
       { $inc: { [seatField]: -mix.adult } },
     );
 
-    await payments.insertOne({
-      _id: await nextId('payments'),
+    await PaymentModel.create({
       booking_id: bookingId,
       amount: quote.total,
       currency: 'EUR',
@@ -393,21 +376,34 @@ export async function seedAccounts(): Promise<void> {
       created_at: timestamp,
     });
 
-    await auditLogs.insertOne({
-      _id: await nextId('audit_logs'),
+    await AuditLogModel.create({
       user_id: clientId,
       action: 'seed.booking',
       entity: 'booking',
       entity_id: String(bookingId),
-      details: `Réservation de démonstration ${sample.from} → ${sample.to}`,
+      details: `Demonstration booking ${sample.from} → ${sample.to}`,
       created_at: timestamp,
     });
   }
 }
 
-/** Ensure the database is indexed and populated. Called once per server process. */
 export async function ensureSeeded(): Promise<void> {
   await ensureIndexes();
+
+  const migrated = await backfillSessionVersions();
+  if (migrated > 0) {
+    console.log(`[skyroute] ${migrated} account(s) migrated to session revocation.`);
+  }
+
+  if (!env.SEED_ON_BOOT) return;
+
   await seedDatabase();
   await seedAccounts();
+
+  if (env.SEED_DEMO_ACCOUNTS) {
+    console.warn(
+      `[skyroute] demonstration accounts active: ${DEMO_ACCOUNTS.map((a) => a.email).join(', ')}. ` +
+        'Set SEED_DEMO_ACCOUNTS=false before going live.',
+    );
+  }
 }

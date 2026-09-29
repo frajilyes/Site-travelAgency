@@ -2,15 +2,15 @@ import Link from 'next/link';
 import { requireAdmin } from '@/lib/dal';
 
 const SECTIONS = [
-  { href: '/admin', label: 'Tableau de bord', icon: '📊' },
-  { href: '/admin/vols', label: 'Vols', icon: '✈️' },
-  { href: '/admin/reservations', label: 'Réservations', icon: '🎫' },
-  { href: '/admin/utilisateurs', label: 'Utilisateurs', icon: '👥' },
-  { href: '/admin/aeroports', label: 'Aéroports', icon: '🛫' },
-  { href: '/admin/compagnies', label: 'Compagnies', icon: '🏷️' },
-  { href: '/admin/avions', label: 'Flotte', icon: '🛩️' },
-  { href: '/admin/pays', label: 'Pays', icon: '🌍' },
-  { href: '/admin/journal', label: 'Journal', icon: '📜' },
+  { href: '/admin', label: 'Dashboard', icon: '📊' },
+  { href: '/admin/flights', label: 'Flights', icon: '✈️' },
+  { href: '/admin/bookings', label: 'Bookings', icon: '🎫' },
+  { href: '/admin/users', label: 'Users', icon: '👥' },
+  { href: '/admin/airports', label: 'Airports', icon: '🛫' },
+  { href: '/admin/airlines', label: 'Airlines', icon: '🏷️' },
+  { href: '/admin/aircraft', label: 'Fleet', icon: '🛩️' },
+  { href: '/admin/countries', label: 'Countries', icon: '🌍' },
+  { href: '/admin/audit', label: 'Audit log', icon: '📜' },
 ];
 
 export default async function AdminLayout({ children }: LayoutProps<'/admin'>) {
@@ -37,7 +37,7 @@ export default async function AdminLayout({ children }: LayoutProps<'/admin'>) {
               ))}
             </nav>
             <div className="mt-3 border-t border-line px-2 pt-3 text-xs text-ink-muted">
-              Connecté en tant que
+              Signed in as
               <br />
               <span className="font-medium text-ink">
                 {admin.first_name} {admin.last_name}

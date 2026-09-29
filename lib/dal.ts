@@ -3,33 +3,42 @@ import { cache } from 'react';
 import { redirect } from 'next/navigation';
 import { findActiveUser } from './queries/users';
 import { readSession } from './session';
+import { safeRelativePath } from './request';
 import type { PublicUser } from './types';
 
-/**
- * Resolve the signed-in user from the session cookie and re-check them against
- * the database, so a suspended or deleted account loses access immediately.
- * Memoized per render pass.
- */
 export const getCurrentUser = cache(async (): Promise<PublicUser | null> => {
   const session = await readSession();
   if (!session) return null;
 
-  return (await findActiveUser(session.userId)) ?? null;
+  const account = await findActiveUser(session.userId);
+  if (!account) return null;
+
+  if (account.session_version !== session.version) return null;
+
+  return {
+    id: account.id,
+    email: account.email,
+    first_name: account.first_name,
+    last_name: account.last_name,
+    phone: account.phone,
+    role: account.role,
+    status: account.status,
+    created_at: account.created_at,
+  };
 });
 
-/** Require a signed-in user, or redirect to the login page. */
 export async function requireUser(returnTo?: string): Promise<PublicUser> {
   const user = await getCurrentUser();
   if (!user) {
-    redirect(returnTo ? `/connexion?next=${encodeURIComponent(returnTo)}` : '/connexion');
+    const next = safeRelativePath(returnTo);
+    redirect(next ? `/login?next=${encodeURIComponent(next)}` : '/login');
   }
   return user;
 }
 
-/** Require an administrator, or redirect. Used by every admin page and action. */
 export async function requireAdmin(): Promise<PublicUser> {
   const user = await getCurrentUser();
-  if (!user) redirect('/connexion?next=%2Fadmin');
-  if (user.role !== 'admin') redirect('/compte');
+  if (!user) redirect('/login?next=%2Fadmin');
+  if (user.role !== 'admin') redirect('/account');
   return user;
 }

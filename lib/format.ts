@@ -1,6 +1,6 @@
 import type { CabinClass } from './types';
 
-const CURRENCY = new Intl.NumberFormat('fr-FR', {
+const CURRENCY = new Intl.NumberFormat('en-GB', {
   style: 'currency',
   currency: 'EUR',
   maximumFractionDigits: 2,
@@ -10,21 +10,11 @@ export function formatPrice(amount: number): string {
   return CURRENCY.format(amount);
 }
 
-/**
- * Stored timestamps come in two shapes: `YYYY-MM-DDTHH:mm` for the times local
- * to an airport, and `YYYY-MM-DD HH:MM:SS` for the UTC ones (`created_at`,
- * `departure_utc`). Splitting on either separator lets every caller pass a
- * stored value as-is.
- */
 const SEPARATOR = /[T ]/;
 
-/**
- * Format a stored timestamp. Values are rendered verbatim rather than shifted
- * by timezone: an airport-local time is already the time the traveller reads.
- */
 export function formatDateTime(value: string): string {
   const [date, time] = value.split(SEPARATOR);
-  return `${formatDate(date)} à ${(time ?? '').slice(0, 5)}`;
+  return `${formatDate(date)} at ${(time ?? '').slice(0, 5)}`;
 }
 
 export function formatDate(value: string): string {
@@ -34,7 +24,7 @@ export function formatDate(value: string): string {
 
 export function formatLongDate(value: string): string {
   const d = new Date(`${value.split(SEPARATOR)[0]}T12:00:00Z`);
-  return new Intl.DateTimeFormat('fr-FR', {
+  return new Intl.DateTimeFormat('en-GB', {
     weekday: 'long',
     day: 'numeric',
     month: 'long',
@@ -50,7 +40,7 @@ export function formatTime(value: string): string {
 export function formatDuration(minutes: number): string {
   const h = Math.floor(minutes / 60);
   const m = minutes % 60;
-  return m === 0 ? `${h}h` : `${h}h ${String(m).padStart(2, '0')}`;
+  return m === 0 ? `${h}h` : `${h}h ${String(m).padStart(2, '0')}m`;
 }
 
 export function priceForClass(
@@ -71,17 +61,14 @@ export function seatsForClass(
   return flight.seats_economy;
 }
 
-/** Parse the stored `YYYY-MM-DD HH:MM:SS` UTC form into a Date. */
 export function parseSqlUtc(value: string): Date {
   return new Date(`${value.replace(' ', 'T')}Z`);
 }
 
-/** Render a Date in the stored, lexically comparable UTC form. */
 export function toSqlUtc(date: Date): string {
   return date.toISOString().slice(0, 19).replace('T', ' ');
 }
 
-/** `YYYY-MM-DD` for today, used as the minimum selectable travel date. */
 export function today(): string {
   return new Date().toISOString().slice(0, 10);
 }

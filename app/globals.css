@@ -1,8 +1,5 @@
 @import "tailwindcss";
 
-/* The theme is driven by a `dark` class on <html> so that CSS variables and
-   Tailwind's `dark:` utilities always agree, whether the class comes from the
-   system preference or from the manual toggle. */
 @custom-variant dark (&:where(.dark, .dark *));
 
 @theme {
@@ -30,7 +27,7 @@
   --color-line: var(--line);
 
   --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
-  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+  --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
 }
 
 :root {
@@ -64,6 +61,13 @@ body {
 }
 
 @layer components {
+  /* Skips style, layout and paint for a block until it nears the viewport.
+     The intrinsic size keeps the scrollbar honest so nothing shifts. */
+  .below-fold {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 600px;
+  }
+
   .card {
     background: var(--surface-raised);
     border: 1px solid var(--line);

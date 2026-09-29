@@ -3,8 +3,11 @@
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { requireAdmin } from '@/lib/dal';
+import type { PublicUser } from '@/lib/types';
+import { clientIp } from '@/lib/request';
+import { RULES, consume, retryMessage } from '@/lib/rate-limit';
 import { computeSchedule } from '@/lib/geo';
-import { isDuplicateKey } from '@/lib/mongodb';
+import { isDuplicateKey } from '@/lib/db';
 import { hashPassword } from '@/lib/password';
 import {
   aircraftUsage,
@@ -38,7 +41,7 @@ import {
   countAdmins,
   createUser,
   deleteUser,
-  findUserByEmail,
+  emailTaken,
   getUser,
   logAction,
   setUserRole,
@@ -52,33 +55,63 @@ import {
   AdminUserCreateSchema,
   AdminUserSchema,
   CountrySchema,
+  BookingStatusSchema,
   FlightSchema,
+  FlightStatusSchema,
+  IdSchema,
   fieldErrors,
   type ActionState,
 } from '@/lib/validation';
 
-/** MongoDB reports a unique-index violation with the error code 11000. */
 function duplicateMessage(error: unknown, field: string, label: string): ActionState | null {
   if (isDuplicateKey(error)) {
-    return { errors: { [field]: [`${label} est déjà utilisé.`] } };
+    return { errors: { [field]: [`${label} is already in use.`] } };
   }
   return null;
 }
 
+interface AdminContext {
+  admin: PublicUser;
+  ip: string;
+  blocked: ActionState | null;
+}
+
+async function adminContext(): Promise<AdminContext> {
+  const admin = await requireAdmin();
+  const ip = await clientIp();
+  const quota = await consume('admin:write', String(admin.id), RULES.adminWrite);
+  return {
+    admin,
+    ip,
+    blocked: quota.allowed ? null : { message: retryMessage(quota.retryAfterMs) },
+  };
+}
+
+function readId(value: FormDataEntryValue | null): number | null {
+  const parsed = IdSchema.safeParse(value);
+  return parsed.success ? parsed.data : null;
+}
+
+function readOptionalId(value: FormDataEntryValue | null): number | null | undefined {
+  if (value === null || value === '') return undefined;
+  return readId(value);
+}
+
 function refreshReference() {
-  revalidatePath('/admin/pays');
-  revalidatePath('/admin/aeroports');
-  revalidatePath('/admin/compagnies');
-  revalidatePath('/admin/avions');
-  revalidatePath('/admin/vols');
+  revalidatePath('/admin/countries');
+  revalidatePath('/admin/airports');
+  revalidatePath('/admin/airlines');
+  revalidatePath('/admin/aircraft');
+  revalidatePath('/admin/flights');
   revalidatePath('/destinations');
 }
 
-/* ------------------------------------------------------------------ pays */
-
 export async function saveCountry(_state: ActionState, formData: FormData): Promise<ActionState> {
-  const admin = await requireAdmin();
-  const id = Number(formData.get('id')) || null;
+  const { admin, ip, blocked } = await adminContext();
+  if (blocked) return blocked;
+
+  const id = readOptionalId(formData.get('id'));
+  if (id === null) return { message: 'Invalid identifier.' };
 
   const parsed = CountrySchema.safeParse({
     code: formData.get('code'),
@@ -95,38 +128,63 @@ export async function saveCountry(_state: ActionState, formData: FormData): Prom
   try {
     if (id) {
       await updateCountry(id, input);
-      await logAction(admin.id, 'country.update', 'country', id, `Pays modifié : ${input.name}`);
+      await logAction({
+        userId: admin.id,
+        action: 'country.update',
+        entity: 'country',
+        entityId: id,
+        details: `Country updated: ${input.name}`,
+        ip,
+      });
     } else {
       const newId = await createCountry(input);
-      await logAction(admin.id, 'country.create', 'country', newId, `Pays créé : ${input.name}`);
+      await logAction({
+        userId: admin.id,
+        action: 'country.create',
+        entity: 'country',
+        entityId: newId,
+        details: `Country created: ${input.name}`,
+        ip,
+      });
     }
   } catch (error) {
-    const duplicate = duplicateMessage(error, 'code', 'Ce code pays');
+    const duplicate = duplicateMessage(error, 'code', 'This country code');
     if (duplicate) return duplicate;
     throw error;
   }
 
   refreshReference();
-  redirect('/admin/pays');
+  redirect('/admin/countries');
 }
 
 export async function removeCountry(_state: ActionState, formData: FormData): Promise<ActionState> {
-  const admin = await requireAdmin();
-  const id = Number(formData.get('id'));
+  const { admin, ip, blocked } = await adminContext();
+  if (blocked) return blocked;
+
+  const id = readId(formData.get('id'));
+  if (id === null) return { message: 'Invalid identifier.' };
   if ((await countryUsage(id)) > 0) {
-    return { message: 'Ce pays est référencé par des aéroports, compagnies ou passagers : suppression impossible.' };
+    return { message: 'This country is referenced by airports, airlines or passengers, so it cannot be deleted.' };
   }
   await deleteCountry(id);
-  await logAction(admin.id, 'country.delete', 'country', id, 'Pays supprimé');
+  await logAction({
+    userId: admin.id,
+    action: 'country.delete',
+    entity: 'country',
+    entityId: id,
+    details: 'Country deleted',
+    ip,
+  });
   refreshReference();
-  return { success: true, message: 'Pays supprimé.' };
+  return { success: true, message: 'Country deleted.' };
 }
 
-/* -------------------------------------------------------------- aéroports */
-
 export async function saveAirport(_state: ActionState, formData: FormData): Promise<ActionState> {
-  const admin = await requireAdmin();
-  const id = Number(formData.get('id')) || null;
+  const { admin, ip, blocked } = await adminContext();
+  if (blocked) return blocked;
+
+  const id = readOptionalId(formData.get('id'));
+  if (id === null) return { message: 'Invalid identifier.' };
 
   const parsed = AirportSchema.safeParse({
     iata: formData.get('iata'),
@@ -151,38 +209,63 @@ export async function saveAirport(_state: ActionState, formData: FormData): Prom
   try {
     if (id) {
       await updateAirport(id, input);
-      await logAction(admin.id, 'airport.update', 'airport', id, `Aéroport modifié : ${input.iata}`);
+      await logAction({
+        userId: admin.id,
+        action: 'airport.update',
+        entity: 'airport',
+        entityId: id,
+        details: `Airport updated: ${input.iata}`,
+        ip,
+      });
     } else {
       const newId = await createAirport(input);
-      await logAction(admin.id, 'airport.create', 'airport', newId, `Aéroport créé : ${input.iata}`);
+      await logAction({
+        userId: admin.id,
+        action: 'airport.create',
+        entity: 'airport',
+        entityId: newId,
+        details: `Airport created: ${input.iata}`,
+        ip,
+      });
     }
   } catch (error) {
-    const duplicate = duplicateMessage(error, 'iata', 'Ce code IATA');
+    const duplicate = duplicateMessage(error, 'iata', 'This IATA code');
     if (duplicate) return duplicate;
     throw error;
   }
 
   refreshReference();
-  redirect('/admin/aeroports');
+  redirect('/admin/airports');
 }
 
 export async function removeAirport(_state: ActionState, formData: FormData): Promise<ActionState> {
-  const admin = await requireAdmin();
-  const id = Number(formData.get('id'));
+  const { admin, ip, blocked } = await adminContext();
+  if (blocked) return blocked;
+
+  const id = readId(formData.get('id'));
+  if (id === null) return { message: 'Invalid identifier.' };
   if ((await airportUsage(id)) > 0) {
-    return { message: 'Des vols utilisent cet aéroport : supprimez-les d’abord.' };
+    return { message: 'Flights use this airport, so delete them first.' };
   }
   await deleteAirport(id);
-  await logAction(admin.id, 'airport.delete', 'airport', id, 'Aéroport supprimé');
+  await logAction({
+    userId: admin.id,
+    action: 'airport.delete',
+    entity: 'airport',
+    entityId: id,
+    details: 'Airport deleted',
+    ip,
+  });
   refreshReference();
-  return { success: true, message: 'Aéroport supprimé.' };
+  return { success: true, message: 'Airport deleted.' };
 }
 
-/* ------------------------------------------------------------- compagnies */
-
 export async function saveAirline(_state: ActionState, formData: FormData): Promise<ActionState> {
-  const admin = await requireAdmin();
-  const id = Number(formData.get('id')) || null;
+  const { admin, ip, blocked } = await adminContext();
+  if (blocked) return blocked;
+
+  const id = readOptionalId(formData.get('id'));
+  if (id === null) return { message: 'Invalid identifier.' };
 
   const parsed = AirlineSchema.safeParse({
     iata: formData.get('iata'),
@@ -204,38 +287,63 @@ export async function saveAirline(_state: ActionState, formData: FormData): Prom
   try {
     if (id) {
       await updateAirline(id, input);
-      await logAction(admin.id, 'airline.update', 'airline', id, `Compagnie modifiée : ${input.name}`);
+      await logAction({
+        userId: admin.id,
+        action: 'airline.update',
+        entity: 'airline',
+        entityId: id,
+        details: `Airline updated: ${input.name}`,
+        ip,
+      });
     } else {
       const newId = await createAirline(input);
-      await logAction(admin.id, 'airline.create', 'airline', newId, `Compagnie créée : ${input.name}`);
+      await logAction({
+        userId: admin.id,
+        action: 'airline.create',
+        entity: 'airline',
+        entityId: newId,
+        details: `Airline created: ${input.name}`,
+        ip,
+      });
     }
   } catch (error) {
-    const duplicate = duplicateMessage(error, 'iata', 'Ce code IATA');
+    const duplicate = duplicateMessage(error, 'iata', 'This IATA code');
     if (duplicate) return duplicate;
     throw error;
   }
 
   refreshReference();
-  redirect('/admin/compagnies');
+  redirect('/admin/airlines');
 }
 
 export async function removeAirline(_state: ActionState, formData: FormData): Promise<ActionState> {
-  const admin = await requireAdmin();
-  const id = Number(formData.get('id'));
+  const { admin, ip, blocked } = await adminContext();
+  if (blocked) return blocked;
+
+  const id = readId(formData.get('id'));
+  if (id === null) return { message: 'Invalid identifier.' };
   if ((await airlineUsage(id)) > 0) {
-    return { message: 'Des vols sont opérés par cette compagnie : supprimez-les d’abord.' };
+    return { message: 'Flights are operated by this airline, so delete them first.' };
   }
   await deleteAirline(id);
-  await logAction(admin.id, 'airline.delete', 'airline', id, 'Compagnie supprimée');
+  await logAction({
+    userId: admin.id,
+    action: 'airline.delete',
+    entity: 'airline',
+    entityId: id,
+    details: 'Airline deleted',
+    ip,
+  });
   refreshReference();
-  return { success: true, message: 'Compagnie supprimée.' };
+  return { success: true, message: 'Airline deleted.' };
 }
 
-/* ----------------------------------------------------------------- avions */
-
 export async function saveAircraft(_state: ActionState, formData: FormData): Promise<ActionState> {
-  const admin = await requireAdmin();
-  const id = Number(formData.get('id')) || null;
+  const { admin, ip, blocked } = await adminContext();
+  if (blocked) return blocked;
+
+  const id = readOptionalId(formData.get('id'));
+  if (id === null) return { message: 'Invalid identifier.' };
 
   const parsed = AircraftSchema.safeParse({
     code: formData.get('code'),
@@ -252,44 +360,69 @@ export async function saveAircraft(_state: ActionState, formData: FormData): Pro
   const total =
     parsed.data.capacity_economy + parsed.data.capacity_business + parsed.data.capacity_first;
   if (total === 0) {
-    return { errors: { capacity_economy: ['L’appareil doit avoir au moins un siège.'] } };
+    return { errors: { capacity_economy: ['The aircraft must have at least one seat.'] } };
   }
 
   try {
     if (id) {
       await updateAircraft(id, parsed.data);
-      await logAction(admin.id, 'aircraft.update', 'aircraft', id, `Appareil modifié : ${parsed.data.model}`);
+      await logAction({
+        userId: admin.id,
+        action: 'aircraft.update',
+        entity: 'aircraft',
+        entityId: id,
+        details: `Aircraft updated: ${parsed.data.model}`,
+        ip,
+      });
     } else {
       const newId = await createAircraft(parsed.data);
-      await logAction(admin.id, 'aircraft.create', 'aircraft', newId, `Appareil créé : ${parsed.data.model}`);
+      await logAction({
+        userId: admin.id,
+        action: 'aircraft.create',
+        entity: 'aircraft',
+        entityId: newId,
+        details: `Aircraft created: ${parsed.data.model}`,
+        ip,
+      });
     }
   } catch (error) {
-    const duplicate = duplicateMessage(error, 'code', 'Ce code appareil');
+    const duplicate = duplicateMessage(error, 'code', 'This aircraft code');
     if (duplicate) return duplicate;
     throw error;
   }
 
   refreshReference();
-  redirect('/admin/avions');
+  redirect('/admin/aircraft');
 }
 
 export async function removeAircraft(_state: ActionState, formData: FormData): Promise<ActionState> {
-  const admin = await requireAdmin();
-  const id = Number(formData.get('id'));
+  const { admin, ip, blocked } = await adminContext();
+  if (blocked) return blocked;
+
+  const id = readId(formData.get('id'));
+  if (id === null) return { message: 'Invalid identifier.' };
   if ((await aircraftUsage(id)) > 0) {
-    return { message: 'Des vols utilisent cet appareil : supprimez-les d’abord.' };
+    return { message: 'Flights use this aircraft, so delete them first.' };
   }
   await deleteAircraft(id);
-  await logAction(admin.id, 'aircraft.delete', 'aircraft', id, 'Appareil supprimé');
+  await logAction({
+    userId: admin.id,
+    action: 'aircraft.delete',
+    entity: 'aircraft',
+    entityId: id,
+    details: 'Aircraft deleted',
+    ip,
+  });
   refreshReference();
-  return { success: true, message: 'Appareil supprimé.' };
+  return { success: true, message: 'Aircraft deleted.' };
 }
 
-/* ------------------------------------------------------------------ vols */
-
 export async function saveFlight(_state: ActionState, formData: FormData): Promise<ActionState> {
-  const admin = await requireAdmin();
-  const id = Number(formData.get('id')) || null;
+  const { admin, ip, blocked } = await adminContext();
+  if (blocked) return blocked;
+
+  const id = readOptionalId(formData.get('id'));
+  if (id === null) return { message: 'Invalid identifier.' };
 
   const parsed = FlightSchema.safeParse({
     flight_number: formData.get('flight_number'),
@@ -311,14 +444,14 @@ export async function saveFlight(_state: ActionState, formData: FormData): Promi
 
   const data = parsed.data;
   if (data.origin_id === data.destination_id) {
-    return { errors: { destination_id: ['Le départ et l’arrivée doivent être différents.'] } };
+    return { errors: { destination_id: ['Origin and destination must be different.'] } };
   }
 
   const origin = await getAirport(data.origin_id);
   const destination = await getAirport(data.destination_id);
   const aircraft = await getAircraft(data.aircraft_id);
   if (!origin || !destination || !aircraft) {
-    return { message: 'Aéroport ou appareil introuvable.' };
+    return { message: 'Airport or aircraft not found.' };
   }
 
   if (
@@ -329,7 +462,7 @@ export async function saveFlight(_state: ActionState, formData: FormData): Promi
     return {
       errors: {
         seats_economy: [
-          `Capacité de l’appareil dépassée (${aircraft.capacity_economy} éco / ${aircraft.capacity_business} affaires / ${aircraft.capacity_first} première).`,
+          `Aircraft capacity exceeded (${aircraft.capacity_economy} economy / ${aircraft.capacity_business} business / ${aircraft.capacity_first} first).`,
         ],
       },
     };
@@ -346,7 +479,7 @@ export async function saveFlight(_state: ActionState, formData: FormData): Promi
     return {
       errors: {
         aircraft_id: [
-          `Distance de ${schedule.distanceKm} km supérieure au rayon d’action de l’appareil (${aircraft.range_km} km).`,
+          `Distance of ${schedule.distanceKm} km exceeds the aircraft range (${aircraft.range_km} km).`,
         ],
       },
     };
@@ -363,85 +496,127 @@ export async function saveFlight(_state: ActionState, formData: FormData): Promi
   try {
     if (id) {
       await updateFlight(id, input);
-      await logAction(admin.id, 'flight.update', 'flight', id, `Vol modifié : ${data.flight_number}`);
+      await logAction({
+        userId: admin.id,
+        action: 'flight.update',
+        entity: 'flight',
+        entityId: id,
+        details: `Flight updated: ${data.flight_number}`,
+        ip,
+      });
     } else {
       const newId = await createFlight(input);
-      await logAction(admin.id, 'flight.create', 'flight', newId, `Vol créé : ${data.flight_number}`);
+      await logAction({
+        userId: admin.id,
+        action: 'flight.create',
+        entity: 'flight',
+        entityId: newId,
+        details: `Flight created: ${data.flight_number}`,
+        ip,
+      });
     }
   } catch (error) {
-    const duplicate = duplicateMessage(error, 'flight_number', 'Ce numéro de vol à cette date');
+    const duplicate = duplicateMessage(error, 'flight_number', 'This flight number on this date');
     if (duplicate) return duplicate;
     throw error;
   }
 
-  revalidatePath('/admin/vols');
-  revalidatePath('/vols');
-  redirect('/admin/vols');
+  revalidatePath('/admin/flights');
+  revalidatePath('/flights');
+  redirect('/admin/flights');
 }
 
 export async function changeFlightStatus(
   _state: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
-  const admin = await requireAdmin();
-  const id = Number(formData.get('id'));
-  const status = String(formData.get('status'));
+  const { admin, ip, blocked } = await adminContext();
+  if (blocked) return blocked;
 
-  if (!['scheduled', 'delayed', 'cancelled', 'departed', 'landed'].includes(status)) {
-    return { message: 'Statut inconnu.' };
-  }
+  const id = readId(formData.get('id'));
+  if (id === null) return { message: 'Invalid identifier.' };
+  const status = FlightStatusSchema.safeParse(formData.get('status'));
+  if (!status.success) return { message: 'Unknown status.' };
 
-  await setFlightStatus(id, status as 'scheduled');
-  await logAction(admin.id, 'flight.status', 'flight', id, `Statut du vol : ${status}`);
-  revalidatePath('/admin/vols');
-  revalidatePath('/vols');
-  return { success: true, message: 'Statut du vol mis à jour.' };
+  await setFlightStatus(id, status.data);
+  await logAction({
+    userId: admin.id,
+    action: 'flight.status',
+    entity: 'flight',
+    entityId: id,
+    details: `Flight status: ${status.data}`,
+    ip,
+  });
+  revalidatePath('/admin/flights');
+  revalidatePath('/flights');
+  return { success: true, message: 'Flight status updated.' };
 }
 
 export async function removeFlight(_state: ActionState, formData: FormData): Promise<ActionState> {
-  const admin = await requireAdmin();
-  const id = Number(formData.get('id'));
+  const { admin, ip, blocked } = await adminContext();
+  if (blocked) return blocked;
+
+  const id = readId(formData.get('id'));
+  if (id === null) return { message: 'Invalid identifier.' };
 
   if ((await flightBookingCount(id)) > 0) {
     return {
       message:
-        'Des réservations actives portent sur ce vol. Annulez-les, ou passez le vol au statut « annulé ».',
+        'Active bookings exist for this flight. Cancel them, or set the flight status to “cancelled”.',
     };
   }
 
   await deleteFlight(id);
-  await logAction(admin.id, 'flight.delete', 'flight', id, 'Vol supprimé');
-  revalidatePath('/admin/vols');
-  revalidatePath('/vols');
-  return { success: true, message: 'Vol supprimé.' };
+  await logAction({
+    userId: admin.id,
+    action: 'flight.delete',
+    entity: 'flight',
+    entityId: id,
+    details: 'Flight deleted',
+    ip,
+  });
+  revalidatePath('/admin/flights');
+  revalidatePath('/flights');
+  return { success: true, message: 'Flight deleted.' };
 }
-
-/* --------------------------------------------------------- réservations */
 
 export async function changeBookingStatus(
   _state: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
-  const admin = await requireAdmin();
-  const id = Number(formData.get('id'));
-  const status = String(formData.get('status'));
+  const { admin, ip, blocked } = await adminContext();
+  if (blocked) return blocked;
 
-  if (!['pending', 'confirmed', 'completed'].includes(status)) {
-    return { message: 'Pour annuler une réservation, utilisez le bouton d’annulation (remboursement et remise en vente des sièges).' };
+  const id = readId(formData.get('id'));
+  if (id === null) return { message: 'Invalid identifier.' };
+  const status = BookingStatusSchema.safeParse(formData.get('status'));
+  if (!status.success) {
+    return {
+      message:
+        'To cancel a booking, use the cancel button: it issues the refund and puts the seats back on sale.',
+    };
   }
 
-  await setBookingStatus(id, status as 'confirmed', admin.id);
-  revalidatePath('/admin/reservations');
-  return { success: true, message: 'Statut de la réservation mis à jour.' };
+  await setBookingStatus(id, status.data);
+  await logAction({
+    userId: admin.id,
+    action: 'booking.status',
+    entity: 'booking',
+    entityId: id,
+    details: `Status changed to ${status.data}`,
+    ip,
+  });
+  revalidatePath('/admin/bookings');
+  return { success: true, message: 'Booking status updated.' };
 }
 
-/* ----------------------------------------------------------- utilisateurs */
-
 export async function saveUser(_state: ActionState, formData: FormData): Promise<ActionState> {
-  const admin = await requireAdmin();
-  const id = Number(formData.get('id')) || null;
+  const { admin, ip, blocked } = await adminContext();
+  if (blocked) return blocked;
 
-  // A new account needs a password; editing an existing one leaves it untouched.
+  const id = readOptionalId(formData.get('id'));
+  if (id === null) return { message: 'Invalid identifier.' };
+
   const raw = {
     first_name: formData.get('first_name'),
     last_name: formData.get('last_name'),
@@ -452,13 +627,13 @@ export async function saveUser(_state: ActionState, formData: FormData): Promise
     password: formData.get('password'),
   };
 
-  if (id === null) {
+  if (id === undefined) {
     const parsed = AdminUserCreateSchema.safeParse(raw);
     if (!parsed.success) return { errors: fieldErrors(parsed.error) };
 
     const data = parsed.data;
-    if (await findUserByEmail(data.email)) {
-      return { errors: { email: ['Cette adresse e-mail est déjà utilisée.'] } };
+    if (await emailTaken(data.email)) {
+      return { errors: { email: ['This email address is already in use.'] } };
     }
 
     const newId = await createUser({
@@ -470,29 +645,35 @@ export async function saveUser(_state: ActionState, formData: FormData): Promise
       role: data.role,
     });
     await setUserStatus(newId, data.status);
-    await logAction(admin.id, 'user.create', 'user', newId, `Compte créé : ${data.email}`);
+    await logAction({
+      userId: admin.id,
+      action: 'user.create',
+      entity: 'user',
+      entityId: newId,
+      details: `Account created: ${data.email}`,
+      ip,
+    });
 
-    revalidatePath('/admin/utilisateurs');
-    redirect('/admin/utilisateurs');
+    revalidatePath('/admin/users');
+    redirect('/admin/users');
   }
 
   const parsed = AdminUserSchema.safeParse(raw);
   if (!parsed.success) return { errors: fieldErrors(parsed.error) };
 
   const data = parsed.data;
-  const existing = await findUserByEmail(data.email);
-  if (existing && existing.id !== id) {
-    return { errors: { email: ['Cette adresse e-mail est déjà utilisée.'] } };
+  if (await emailTaken(data.email, id)) {
+    return { errors: { email: ['This email address is already in use.'] } };
   }
 
   {
     const current = await getUser(id);
-    if (!current) return { message: 'Utilisateur introuvable.' };
+    if (!current) return { message: 'User not found.' };
 
     const losesAdmin =
       current.role === 'admin' && (data.role !== 'admin' || data.status !== 'active');
     if (losesAdmin && (await countAdmins()) <= 1) {
-      return { message: 'Impossible : il doit rester au moins un administrateur actif.' };
+      return { message: 'Not possible: at least one active administrator must remain.' };
     }
 
     await updateProfile(id, {
@@ -503,51 +684,78 @@ export async function saveUser(_state: ActionState, formData: FormData): Promise
     });
     await setUserRole(id, data.role);
     await setUserStatus(id, data.status);
-    await logAction(admin.id, 'user.update', 'user', id, `Compte modifié : ${data.email}`);
+    await logAction({
+      userId: admin.id,
+      action: 'user.update',
+      entity: 'user',
+      entityId: id,
+      details: `Account updated: ${data.email}`,
+      ip,
+    });
   }
 
-  revalidatePath('/admin/utilisateurs');
-  redirect('/admin/utilisateurs');
+  revalidatePath('/admin/users');
+  redirect('/admin/users');
 }
 
 export async function toggleUserStatus(
   _state: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
-  const admin = await requireAdmin();
-  const id = Number(formData.get('id'));
+  const { admin, ip, blocked } = await adminContext();
+  if (blocked) return blocked;
+
+  const id = readId(formData.get('id'));
+  if (id === null) return { message: 'Invalid identifier.' };
   const user = await getUser(id);
-  if (!user) return { message: 'Utilisateur introuvable.' };
+  if (!user) return { message: 'User not found.' };
 
   const next = user.status === 'active' ? 'suspended' : 'active';
   if (next === 'suspended' && user.role === 'admin' && (await countAdmins()) <= 1) {
-    return { message: 'Impossible : il doit rester au moins un administrateur actif.' };
+    return { message: 'Not possible: at least one active administrator must remain.' };
   }
   if (next === 'suspended' && user.id === admin.id) {
-    return { message: 'Vous ne pouvez pas suspendre votre propre compte.' };
+    return { message: 'You cannot suspend your own account.' };
   }
 
   await setUserStatus(id, next);
-  await logAction(admin.id, 'user.status', 'user', id, `Compte ${next === 'active' ? 'réactivé' : 'suspendu'}`);
-  revalidatePath('/admin/utilisateurs');
-  return { success: true, message: next === 'active' ? 'Compte réactivé.' : 'Compte suspendu.' };
+  await logAction({
+    userId: admin.id,
+    action: 'user.status',
+    entity: 'user',
+    entityId: id,
+    details: `Account ${next === 'active' ? 'reactivated' : 'suspended'}`,
+    ip,
+  });
+  revalidatePath('/admin/users');
+  return { success: true, message: next === 'active' ? 'Account reactivated.' : 'Account suspended.' };
 }
 
 export async function removeUser(_state: ActionState, formData: FormData): Promise<ActionState> {
-  const admin = await requireAdmin();
-  const id = Number(formData.get('id'));
+  const { admin, ip, blocked } = await adminContext();
+  if (blocked) return blocked;
+
+  const id = readId(formData.get('id'));
+  if (id === null) return { message: 'Invalid identifier.' };
   const user = await getUser(id);
-  if (!user) return { message: 'Utilisateur introuvable.' };
+  if (!user) return { message: 'User not found.' };
 
   if (user.id === admin.id) {
-    return { message: 'Vous ne pouvez pas supprimer votre propre compte.' };
+    return { message: 'You cannot delete your own account.' };
   }
   if (user.role === 'admin' && (await countAdmins()) <= 1) {
-    return { message: 'Impossible : il doit rester au moins un administrateur actif.' };
+    return { message: 'Not possible: at least one active administrator must remain.' };
   }
 
   await deleteUser(id);
-  await logAction(admin.id, 'user.delete', 'user', id, `Compte supprimé : ${user.email}`);
-  revalidatePath('/admin/utilisateurs');
-  return { success: true, message: 'Compte supprimé, avec ses réservations.' };
+  await logAction({
+    userId: admin.id,
+    action: 'user.delete',
+    entity: 'user',
+    entityId: id,
+    details: `Account deleted: ${user.email}`,
+    ip,
+  });
+  revalidatePath('/admin/users');
+  return { success: true, message: 'Account deleted, together with its bookings.' };
 }

@@ -1,18 +1,18 @@
 import 'server-only';
 import nodemailer from 'nodemailer';
 import type { Transporter } from 'nodemailer';
+import { appOrigin, env, isProduction } from './env';
 
 export interface MailMessage {
   to: string;
   subject: string;
-  /** Plain-text fallback, shown by clients that refuse HTML. */
   text: string;
   html: string;
 }
 
 export type MailResult =
   | { sent: true; messageId: string }
-  | { sent: false; reason: 'not-configured' | 'error'; detail?: string };
+  | { sent: false; reason: 'not-configured' | 'invalid-recipient' | 'error'; detail?: string };
 
 interface SmtpConfig {
   host: string;
@@ -23,29 +23,23 @@ interface SmtpConfig {
   from: string;
 }
 
-/**
- * SMTP settings read from the environment. Defaults target Gmail, so a Gmail
- * address plus an app password (SMTP_USER / SMTP_PASS) is enough to send.
- * Returns null when no credentials are set — mail is then skipped, never fatal.
- */
 function smtpConfig(): SmtpConfig | null {
-  const user = process.env.SMTP_USER?.trim();
-  const pass = process.env.SMTP_PASS?.trim();
+  const user = env.SMTP_USER;
+  const pass = env.SMTP_PASS;
   if (!user || !pass) return null;
 
-  const port = Number(process.env.SMTP_PORT ?? 465);
-  const secure = process.env.SMTP_SECURE
-    ? process.env.SMTP_SECURE === 'true'
-    : // 465 is implicit TLS; 587 starts in the clear and upgrades with STARTTLS.
-      port === 465;
+  const port = env.SMTP_PORT;
+  const secure =
+    env.SMTP_SECURE ??
+    port === 465;
 
   return {
-    host: process.env.SMTP_HOST?.trim() || 'smtp.gmail.com',
+    host: env.SMTP_HOST ?? 'smtp.gmail.com',
     port,
     secure,
     user,
     pass,
-    from: process.env.MAIL_FROM?.trim() || `SkyRoute <${user}>`,
+    from: env.MAIL_FROM ?? `SkyRoute <${user}>`,
   };
 }
 
@@ -53,7 +47,6 @@ declare global {
   var __travelMailer: Transporter | undefined;
 }
 
-// One pooled connection, reused across hot reloads in development.
 function transport(config: SmtpConfig): Transporter {
   const existing = globalThis.__travelMailer;
   if (existing) return existing;
@@ -63,33 +56,49 @@ function transport(config: SmtpConfig): Transporter {
     port: config.port,
     secure: config.secure,
     auth: { user: config.user, pass: config.pass },
+    requireTLS: true,
+    tls: {
+      minVersion: 'TLSv1.2',
+      rejectUnauthorized: true,
+      servername: config.host,
+    },
   });
   globalThis.__travelMailer = created;
   return created;
 }
 
-/** Public base URL used for links inside emails. */
 export function appUrl(): string {
-  return (process.env.APP_URL?.trim() || 'http://localhost:3000').replace(/\/+$/, '');
+  return appOrigin();
 }
 
 export function mailerConfigured(): boolean {
   return smtpConfig() !== null;
 }
 
-/**
- * Deliver one message. Failures are logged and reported, never thrown: an
- * unreachable mail server must not undo a booking that is already paid.
- */
+function validRecipient(address: string): boolean {
+  return /^[^\s<>,;:"\\]+@[^\s<>,;:"\\]+\.[A-Za-z]{2,}$/.test(address) && address.length <= 254;
+}
+
+function forLog(address: string): string {
+  if (!isProduction) return address;
+  const at = address.lastIndexOf('@');
+  return at === -1 ? '***' : `***${address.slice(at)}`;
+}
+
 export async function sendMail(message: MailMessage): Promise<MailResult> {
   const config = smtpConfig();
 
   if (!config) {
     console.warn(
-      `[mail] SMTP non configuré — « ${message.subject} » n'a pas été envoyé à ${message.to}. ` +
-        'Renseignez SMTP_USER et SMTP_PASS (voir .env.example).',
+      `[mail] SMTP not configured — "${message.subject}" was not sent. ` +
+        'Set SMTP_USER and SMTP_PASS (see .env.example).',
     );
     return { sent: false, reason: 'not-configured' };
+  }
+
+  if (!validRecipient(message.to)) {
+    console.error('[mail] recipient refused: invalid address.');
+    return { sent: false, reason: 'invalid-recipient' };
   }
 
   try {
@@ -100,11 +109,11 @@ export async function sendMail(message: MailMessage): Promise<MailResult> {
       text: message.text,
       html: message.html,
     });
-    console.log(`[mail] « ${message.subject} » envoyé à ${message.to} (${info.messageId})`);
+    console.log(`[mail] "${message.subject}" sent to ${forLog(message.to)} (${info.messageId})`);
     return { sent: true, messageId: info.messageId };
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
-    console.error(`[mail] échec de l'envoi à ${message.to} : ${detail}`);
+    console.error(`[mail] failed to send to ${forLog(message.to)}: ${detail}`);
     return { sent: false, reason: 'error', detail };
   }
 }

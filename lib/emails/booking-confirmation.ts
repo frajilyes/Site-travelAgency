@@ -9,12 +9,11 @@ const MUTED = '#64748b';
 const LINE = '#e2e8f0';
 
 const PASSENGER_TYPES: Record<Passenger['passenger_type'], string> = {
-  adult: 'Adulte',
-  child: 'Enfant',
-  infant: 'Bébé',
+  adult: 'Adult',
+  child: 'Child',
+  infant: 'Infant',
 };
 
-/** Escape everything that comes from the database before it reaches the HTML. */
 function esc(value: string | number | null | undefined): string {
   return String(value ?? '')
     .replace(/&/g, '&amp;')
@@ -25,22 +24,18 @@ function esc(value: string | number | null | undefined): string {
 
 function paymentLabel(booking: BookingDetail): string {
   const payment = booking.payments.find((entry) => entry.status === 'paid') ?? booking.payments[0];
-  if (!payment) return 'Paiement enregistré';
-  if (payment.method === 'card') return `Carte ••••${payment.card_last4 ?? '????'}`;
-  return payment.method === 'paypal' ? 'PayPal' : 'Virement bancaire';
+  if (!payment) return 'Payment recorded';
+  if (payment.method === 'card') return `Card ••••${payment.card_last4 ?? '????'}`;
+  return payment.method === 'paypal' ? 'PayPal' : 'Bank transfer';
 }
 
 function seatsFor(booking: BookingDetail, leg: 'outbound' | 'return'): string {
   const seats = booking.passengers
     .map((passenger) => (leg === 'outbound' ? passenger.seat_outbound : passenger.seat_return))
     .filter((seat): seat is string => Boolean(seat));
-  return seats.length > 0 ? seats.join(', ') : 'Sur les genoux';
+  return seats.length > 0 ? seats.join(', ') : 'On lap';
 }
 
-/**
- * One flight leg. Built from nested tables with inline styles because Gmail and
- * Outlook drop stylesheets, flexbox and grid.
- */
 function segmentHtml(flight: FlightDetail, label: string, cabin: string, seats: string): string {
   return `
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid ${LINE};border-radius:10px;margin:0 0 16px;">
@@ -69,7 +64,7 @@ function segmentHtml(flight: FlightDetail, label: string, cabin: string, seats: 
             <td width="30%" align="center" style="font:400 12px/1.5 Arial,Helvetica,sans-serif;color:${MUTED};">
               ${esc(formatDuration(flight.duration_minutes))}<br />
               <span style="color:${LINE};">&#9679;&mdash;&mdash;&mdash;&#9679;</span><br />
-              Vol direct
+              Direct flight
             </td>
             <td width="35%" align="right" style="font:400 13px/1.5 Arial,Helvetica,sans-serif;color:${INK};">
               <strong style="font-size:22px;">${esc(formatTime(flight.arrival_time))}</strong><br />
@@ -82,9 +77,9 @@ function segmentHtml(flight: FlightDetail, label: string, cabin: string, seats: 
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:16px;border-top:1px solid ${LINE};">
           <tr>
             <td style="padding-top:12px;font:400 13px/1.6 Arial,Helvetica,sans-serif;color:${MUTED};">
-              Cabine <strong style="color:${INK};">${esc(cabin)}</strong> &nbsp;&middot;&nbsp;
-              Sièges <strong style="color:${INK};font-family:'Courier New',monospace;">${esc(seats)}</strong> &nbsp;&middot;&nbsp;
-              Bagage <strong style="color:${INK};">${esc(flight.baggage_kg)} kg</strong>
+              Cabin <strong style="color:${INK};">${esc(cabin)}</strong> &nbsp;&middot;&nbsp;
+              Seats <strong style="color:${INK};font-family:'Courier New',monospace;">${esc(seats)}</strong> &nbsp;&middot;&nbsp;
+              Baggage <strong style="color:${INK};">${esc(flight.baggage_kg)} kg</strong>
             </td>
           </tr>
         </table>
@@ -98,23 +93,21 @@ function segmentText(flight: FlightDetail, label: string, cabin: string, seats: 
     `${label} — ${flight.flight_number} (${flight.airline_name})`,
     formatLongDate(flight.departure_time),
     `${formatTime(flight.departure_time)} ${flight.origin_iata} ${flight.origin_city} -> ${formatTime(flight.arrival_time)} ${flight.destination_iata} ${flight.destination_city} (${formatDuration(flight.duration_minutes)})`,
-    `Cabine ${cabin} · Sièges ${seats} · Bagage ${flight.baggage_kg} kg`,
+    `Cabin ${cabin} · Seats ${seats} · Baggage ${flight.baggage_kg} kg`,
   ].join('\n');
 }
 
-/** Subject, HTML and plain-text body of the e-ticket sent after a booking. */
 export function bookingConfirmationEmail(booking: BookingDetail): Omit<MailMessage, 'to'> {
   const cabin = CABIN_LABELS[booking.cabin_class];
-  const link = `${appUrl()}/reservation/${booking.reference}`;
+  const link = `${appUrl()}/booking/${booking.reference}`;
   const route = `${booking.outbound.origin_city} → ${booking.outbound.destination_city}`;
-  const subject = `Réservation confirmée ${booking.reference} — ${route}`;
-  // Snippet Gmail shows next to the subject in the inbox list.
-  const preheader = `${route} le ${formatDate(booking.outbound.departure_time)} · ${formatPrice(booking.total_price)} · dossier ${booking.reference}`;
+  const subject = `Booking confirmed ${booking.reference} — ${route}`;
+  const preheader = `${route} on ${formatDate(booking.outbound.departure_time)} · ${formatPrice(booking.total_price)} · reference ${booking.reference}`;
 
   const segments =
-    segmentHtml(booking.outbound, 'Vol aller', cabin, seatsFor(booking, 'outbound')) +
+    segmentHtml(booking.outbound, 'Outbound flight', cabin, seatsFor(booking, 'outbound')) +
     (booking.returnFlight
-      ? segmentHtml(booking.returnFlight, 'Vol retour', cabin, seatsFor(booking, 'return'))
+      ? segmentHtml(booking.returnFlight, 'Return flight', cabin, seatsFor(booking, 'return'))
       : '');
 
   const passengerRows = booking.passengers
@@ -123,7 +116,7 @@ export function bookingConfirmationEmail(booking: BookingDetail): Omit<MailMessa
           <tr>
             <td style="padding:8px 0;border-bottom:1px solid ${LINE};font:400 13px/1.5 Arial,Helvetica,sans-serif;color:${INK};">
               ${esc(passenger.last_name.toUpperCase())} ${esc(passenger.first_name)}<br />
-              <span style="color:${MUTED};font-size:12px;">Passeport ${esc(passenger.passport_number)} &middot; ${esc(passenger.nationality)}</span>
+              <span style="color:${MUTED};font-size:12px;">Passport ${esc(passenger.passport_number)} &middot; ${esc(passenger.nationality)}</span>
             </td>
             <td align="right" style="padding:8px 0;border-bottom:1px solid ${LINE};font:400 13px/1.5 Arial,Helvetica,sans-serif;color:${MUTED};">
               ${esc(PASSENGER_TYPES[passenger.passenger_type])}
@@ -139,7 +132,7 @@ export function bookingConfirmationEmail(booking: BookingDetail): Omit<MailMessa
           </tr>`;
 
   const html = `<!doctype html>
-<html lang="fr">
+<html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
@@ -156,25 +149,25 @@ export function bookingConfirmationEmail(booking: BookingDetail): Omit<MailMessa
             <tr>
               <td style="background:${BRAND};padding:20px 24px;">
                 <span style="font:700 18px/1.2 Arial,Helvetica,sans-serif;color:#ffffff;">SkyRoute</span>
-                <span style="float:right;font:400 12px/1.6 Arial,Helvetica,sans-serif;color:#c7d6ff;">Billet électronique</span>
+                <span style="float:right;font:400 12px/1.6 Arial,Helvetica,sans-serif;color:#c7d6ff;">E-ticket</span>
               </td>
             </tr>
 
             <tr>
               <td style="padding:28px 24px 8px;">
                 <h1 style="margin:0 0 8px;font:700 24px/1.3 Arial,Helvetica,sans-serif;color:${INK};">
-                  Votre réservation est confirmée
+                  Your booking is confirmed
                 </h1>
                 <p style="margin:0 0 20px;font:400 14px/1.6 Arial,Helvetica,sans-serif;color:${MUTED};">
-                  Bonjour ${esc(booking.customer.first_name)}, votre paiement a bien été accepté.
-                  Présentez la référence ci-dessous et une pièce d’identité à l’enregistrement.
+                  Hello ${esc(booking.customer.first_name)}, your payment went through.
+                  Present the reference below and photo ID at check-in.
                 </p>
 
                 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#eef4ff;border-radius:10px;">
                   <tr>
                     <td align="center" style="padding:18px;">
                       <p style="margin:0 0 6px;font:600 11px/1.4 Arial,Helvetica,sans-serif;letter-spacing:.08em;text-transform:uppercase;color:${MUTED};">
-                        Référence de dossier
+                        Booking reference
                       </p>
                       <p style="margin:0;font:700 30px/1.2 'Courier New',monospace;letter-spacing:.2em;color:${BRAND};">
                         ${esc(booking.reference)}
@@ -192,7 +185,7 @@ export function bookingConfirmationEmail(booking: BookingDetail): Omit<MailMessa
             <tr>
               <td style="padding:0 24px;">
                 <h2 style="margin:0 0 4px;font:700 15px/1.4 Arial,Helvetica,sans-serif;color:${INK};">
-                  Passagers (${booking.passengers.length})
+                  Passengers (${booking.passengers.length})
                 </h2>
                 <table role="presentation" width="100%" cellpadding="0" cellspacing="0">${passengerRows}</table>
               </td>
@@ -200,28 +193,28 @@ export function bookingConfirmationEmail(booking: BookingDetail): Omit<MailMessa
 
             <tr>
               <td style="padding:24px;">
-                <h2 style="margin:0 0 4px;font:700 15px/1.4 Arial,Helvetica,sans-serif;color:${INK};">Paiement</h2>
+                <h2 style="margin:0 0 4px;font:700 15px/1.4 Arial,Helvetica,sans-serif;color:${INK};">Payment</h2>
                 <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
-                  ${priceRow('Tarif des vols', formatPrice(booking.base_price))}
-                  ${priceRow('Taxes et redevances', formatPrice(booking.taxes))}
-                  ${priceRow('Total payé', formatPrice(booking.total_price), true)}
-                  ${priceRow('Moyen de paiement', paymentLabel(booking))}
+                  ${priceRow('Flight fares', formatPrice(booking.base_price))}
+                  ${priceRow('Taxes and charges', formatPrice(booking.taxes))}
+                  ${priceRow('Total paid', formatPrice(booking.total_price), true)}
+                  ${priceRow('Payment method', paymentLabel(booking))}
                 </table>
 
                 <table role="presentation" cellpadding="0" cellspacing="0" style="margin:24px 0 0;">
                   <tr>
                     <td style="background:${BRAND};border-radius:8px;">
                       <a href="${esc(link)}" style="display:inline-block;padding:13px 26px;font:700 14px/1 Arial,Helvetica,sans-serif;color:#ffffff;text-decoration:none;">
-                        Voir ma réservation
+                        View my booking
                       </a>
                     </td>
                   </tr>
                 </table>
 
                 <p style="margin:16px 0 0;font:400 12px/1.6 Arial,Helvetica,sans-serif;color:${MUTED};">
-                  L’enregistrement ferme 45 minutes avant le départ. Annulation en ligne :
-                  remboursement intégral à plus de 7 jours du départ, 50 % entre 7 jours et
-                  24 heures, aucun ensuite.
+                  Check-in closes 45 minutes before departure. Cancel online: full refund more
+                  than 7 days before departure, 50% between 7 days and 24 hours, none after
+                  that.
                 </p>
               </td>
             </tr>
@@ -229,13 +222,13 @@ export function bookingConfirmationEmail(booking: BookingDetail): Omit<MailMessa
             <tr>
               <td style="padding:18px 24px 26px;border-top:1px solid ${LINE};">
                 <p style="margin:0 0 6px;font:400 12px/1.6 Arial,Helvetica,sans-serif;color:${MUTED};">
-                  Cet email a été envoyé à ${esc(booking.contact_email)} pour la réservation
-                  ${esc(booking.reference)}. Si vous ne le retrouvez pas, pensez à regarder dans
-                  vos courriers indésirables (spam).
+                  This email was sent to ${esc(booking.contact_email)} for booking
+                  ${esc(booking.reference)}. If you cannot find it, remember to check your junk
+                  mail (spam) folder.
                 </p>
                 <p style="margin:0;font:400 12px/1.6 Arial,Helvetica,sans-serif;color:${MUTED};">
-                  SkyRoute &middot; <a href="${esc(appUrl())}/aide" style="color:${BRAND};text-decoration:none;">Aide</a>
-                  &middot; <a href="${esc(appUrl())}/conditions" style="color:${BRAND};text-decoration:none;">Conditions générales</a>
+                  SkyRoute &middot; <a href="${esc(appUrl())}/help" style="color:${BRAND};text-decoration:none;">Help</a>
+                  &middot; <a href="${esc(appUrl())}/terms" style="color:${BRAND};text-decoration:none;">Terms and conditions</a>
                 </p>
               </td>
             </tr>
@@ -247,30 +240,30 @@ export function bookingConfirmationEmail(booking: BookingDetail): Omit<MailMessa
 </html>`;
 
   const text = [
-    'SkyRoute — votre réservation est confirmée',
+    'SkyRoute — your booking is confirmed',
     '',
-    `Bonjour ${booking.customer.first_name}, votre paiement a bien été accepté.`,
-    `Référence de dossier : ${booking.reference}`,
+    `Hello ${booking.customer.first_name}, your payment went through.`,
+    `Booking reference: ${booking.reference}`,
     '',
-    segmentText(booking.outbound, 'Vol aller', cabin, seatsFor(booking, 'outbound')),
+    segmentText(booking.outbound, 'Outbound flight', cabin, seatsFor(booking, 'outbound')),
     ...(booking.returnFlight
-      ? ['', segmentText(booking.returnFlight, 'Vol retour', cabin, seatsFor(booking, 'return'))]
+      ? ['', segmentText(booking.returnFlight, 'Return flight', cabin, seatsFor(booking, 'return'))]
       : []),
     '',
-    `Passagers (${booking.passengers.length}) :`,
+    `Passengers (${booking.passengers.length}):`,
     ...booking.passengers.map(
       (passenger) =>
-        `- ${passenger.last_name.toUpperCase()} ${passenger.first_name} (${PASSENGER_TYPES[passenger.passenger_type]}) — passeport ${passenger.passport_number}`,
+        `- ${passenger.last_name.toUpperCase()} ${passenger.first_name} (${PASSENGER_TYPES[passenger.passenger_type]}) — passport ${passenger.passport_number}`,
     ),
     '',
-    `Tarif des vols : ${formatPrice(booking.base_price)}`,
-    `Taxes et redevances : ${formatPrice(booking.taxes)}`,
-    `Total payé : ${formatPrice(booking.total_price)} (${paymentLabel(booking)})`,
+    `Flight fares: ${formatPrice(booking.base_price)}`,
+    `Taxes and charges: ${formatPrice(booking.taxes)}`,
+    `Total paid: ${formatPrice(booking.total_price)} (${paymentLabel(booking)})`,
     '',
-    `Voir ma réservation : ${link}`,
+    `View my booking: ${link}`,
     '',
-    'L’enregistrement ferme 45 minutes avant le départ.',
-    `Cet email a été envoyé à ${booking.contact_email}. Si vous ne le retrouvez pas, regardez dans vos courriers indésirables (spam).`,
+    'Check-in closes 45 minutes before departure.',
+    `This email was sent to ${booking.contact_email}. If you cannot find it, check your junk mail (spam) folder.`,
   ].join('\n');
 
   return { subject, html, text };

@@ -48,7 +48,7 @@ function Submit({ label }: { label: string }) {
   const { pending } = useFormStatus();
   return (
     <button type="submit" className="btn btn-primary" disabled={pending}>
-      {pending ? 'Enregistrement…' : label}
+      {pending ? 'Saving…' : label}
     </button>
   );
 }
@@ -59,16 +59,12 @@ const SPAN_CLASS: Record<1 | 2 | 3, string> = {
   3: 'sm:col-span-2 lg:col-span-3',
 };
 
-/**
- * Generic create/update form for the administration area: it renders a field
- * spec, submits to a Server Action and shows the field errors it returns.
- */
 export function EntityForm({
   action,
   fields,
   defaults = {},
   id,
-  submitLabel = 'Enregistrer',
+  submitLabel = 'Save',
   cancelHref,
 }: {
   action: (state: ActionState, formData: FormData) => Promise<ActionState>;
@@ -172,7 +168,7 @@ export function EntityForm({
       <div className="flex gap-2">
         <Submit label={submitLabel} />
         <Link href={cancelHref} className="btn btn-ghost">
-          Annuler
+          Cancel
         </Link>
       </div>
     </form>

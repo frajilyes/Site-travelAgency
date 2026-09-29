@@ -1,27 +1,24 @@
-// Drops the MongoDB database so the next server start recreates and reseeds it.
-import { MongoClient } from 'mongodb';
+import mongoose from 'mongoose';
 
 const URI = process.env.MONGODB_URI ?? 'mongodb://127.0.0.1:27017';
 const DB_NAME = process.env.MONGODB_DB ?? 'skyroute';
 
-const client = new MongoClient(URI, { serverSelectionTimeoutMS: 10_000 });
-
 try {
-  await client.connect();
-  const databases = await client.db().admin().listDatabases({ nameOnly: true });
+  await mongoose.connect(URI, { dbName: DB_NAME, serverSelectionTimeoutMS: 10_000 });
+  const databases = await mongoose.connection.db.admin().listDatabases({ nameOnly: true });
   const exists = databases.databases.some((database) => database.name === DB_NAME);
 
   if (!exists) {
-    console.log(`Aucune base « ${DB_NAME} » sur ${URI} — rien à supprimer.`);
+    console.log(`No database "${DB_NAME}" on ${URI} — nothing to drop.`);
   } else {
-    await client.db(DB_NAME).dropDatabase();
+    await mongoose.connection.dropDatabase();
     console.log(
-      `Base « ${DB_NAME} » supprimée. Elle sera recréée et repeuplée au prochain démarrage.`,
+      `Database "${DB_NAME}" dropped. It will be recreated and reseeded on the next start.`,
     );
   }
 } catch (error) {
-  console.error(`Connexion à MongoDB impossible (${URI}) : ${error.message}`);
+  console.error(`Could not connect to MongoDB (${URI}): ${error.message}`);
   process.exitCode = 1;
 } finally {
-  await client.close();
+  await mongoose.disconnect();
 }

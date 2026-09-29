@@ -27,7 +27,6 @@ function FormError({ message }: { message?: string }) {
   );
 }
 
-/** Google's four-colour mark, inlined so the button needs no network request. */
 function GoogleMark() {
   return (
     <svg viewBox="0 0 48 48" aria-hidden="true" className="h-[18px] w-[18px]">
@@ -51,10 +50,6 @@ function GoogleMark() {
   );
 }
 
-/**
- * Starts the OAuth flow. A plain link rather than a form: the route handler
- * needs a top-level navigation to hand the browser over to Google.
- */
 export function GoogleButton({ next, label }: { next?: string; label: string }) {
   return (
     <>
@@ -68,7 +63,7 @@ export function GoogleButton({ next, label }: { next?: string; label: string }) 
 
       <div className="flex items-center gap-3 text-xs uppercase tracking-wide text-ink-muted">
         <span className="h-px flex-1 bg-line" />
-        ou
+        or
         <span className="h-px flex-1 bg-line" />
       </div>
     </>
@@ -82,12 +77,12 @@ export function LoginForm({ next, google }: { next?: string; google?: boolean })
   return (
     <form action={formAction} className="space-y-4">
       {next ? <input type="hidden" name="next" value={next} /> : null}
-      {google ? <GoogleButton next={next} label="Continuer avec Google" /> : null}
+      {google ? <GoogleButton next={next} label="Continue with Google" /> : null}
       <FormError message={state.message} />
 
       <div>
         <label className="label" htmlFor="email">
-          Adresse e-mail
+          Email address
         </label>
         <input id="email" className="field" name="email" type="email" autoComplete="email" required />
         <FieldError messages={errors.email} />
@@ -95,7 +90,7 @@ export function LoginForm({ next, google }: { next?: string; google?: boolean })
 
       <div>
         <label className="label" htmlFor="password">
-          Mot de passe
+          Password
         </label>
         <input
           id="password"
@@ -108,7 +103,7 @@ export function LoginForm({ next, google }: { next?: string; google?: boolean })
         <FieldError messages={errors.password} />
       </div>
 
-      <Submit label="Se connecter" pendingLabel="Connexion…" />
+      <Submit label="Sign in" pendingLabel="Signing in…" />
     </form>
   );
 }
@@ -120,20 +115,20 @@ export function RegisterForm({ next, google }: { next?: string; google?: boolean
   return (
     <form action={formAction} className="space-y-4">
       {next ? <input type="hidden" name="next" value={next} /> : null}
-      {google ? <GoogleButton next={next} label="S'inscrire avec Google" /> : null}
+      {google ? <GoogleButton next={next} label="Sign up with Google" /> : null}
       <FormError message={state.message} />
 
       <div className="grid gap-4 sm:grid-cols-2">
         <div>
           <label className="label" htmlFor="first_name">
-            Prénom
+            First name
           </label>
           <input id="first_name" className="field" name="first_name" autoComplete="given-name" required />
           <FieldError messages={errors.first_name} />
         </div>
         <div>
           <label className="label" htmlFor="last_name">
-            Nom
+            Last name
           </label>
           <input id="last_name" className="field" name="last_name" autoComplete="family-name" required />
           <FieldError messages={errors.last_name} />
@@ -142,7 +137,7 @@ export function RegisterForm({ next, google }: { next?: string; google?: boolean
 
       <div>
         <label className="label" htmlFor="email">
-          Adresse e-mail
+          Email address
         </label>
         <input id="email" className="field" name="email" type="email" autoComplete="email" required />
         <FieldError messages={errors.email} />
@@ -150,7 +145,7 @@ export function RegisterForm({ next, google }: { next?: string; google?: boolean
 
       <div>
         <label className="label" htmlFor="phone">
-          Téléphone (facultatif)
+          Phone (optional)
         </label>
         <input id="phone" className="field" name="phone" autoComplete="tel" placeholder="+33 6 12 34 56 78" />
         <FieldError messages={errors.phone} />
@@ -159,7 +154,7 @@ export function RegisterForm({ next, google }: { next?: string; google?: boolean
       <div className="grid gap-4 sm:grid-cols-2">
         <div>
           <label className="label" htmlFor="password">
-            Mot de passe
+            Password
           </label>
           <input
             id="password"
@@ -173,7 +168,7 @@ export function RegisterForm({ next, google }: { next?: string; google?: boolean
         </div>
         <div>
           <label className="label" htmlFor="confirm">
-            Confirmation
+            Confirm password
           </label>
           <input
             id="confirm"
@@ -188,10 +183,10 @@ export function RegisterForm({ next, google }: { next?: string; google?: boolean
       </div>
 
       <p className="text-xs text-ink-muted">
-        Au moins 8 caractères, dont une lettre et un chiffre.
+        At least 12 characters, including a lowercase letter, an uppercase letter and a digit.
       </p>
 
-      <Submit label="Créer mon compte" pendingLabel="Création…" />
+      <Submit label="Create my account" pendingLabel="Creating…" />
     </form>
   );
 }

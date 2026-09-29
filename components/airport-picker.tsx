@@ -14,10 +14,6 @@ export function airportLabel(option: AirportOption): string {
   return `${option.city} (${option.iata}) — ${option.country_name}`;
 }
 
-/**
- * Combobox over the airport list. The visible input is free text; the selected
- * IATA code travels in a hidden input so the form submits a stable value.
- */
 export function AirportPicker({
   name,
   label,
@@ -41,8 +37,6 @@ export function AirportPicker({
   const skipFetch = useRef(true);
 
   const term = query.trim();
-  // Suggestions are hidden rather than cleared, so the effect never has to call
-  // setState synchronously.
   const suggestions = term.length < 2 ? [] : options;
 
   useEffect(() => {
@@ -55,7 +49,7 @@ export function AirportPicker({
     const controller = new AbortController();
     const timer = setTimeout(async () => {
       try {
-        const response = await fetch(`/api/aeroports?q=${encodeURIComponent(term)}`, {
+        const response = await fetch(`/api/airports?q=${encodeURIComponent(term)}`, {
           signal: controller.signal,
         });
         if (!response.ok) return;
@@ -63,9 +57,7 @@ export function AirportPicker({
         setOptions(data.airports);
         setHighlight(0);
         setOpen(data.airports.length > 0);
-      } catch {
-        // Aborted or offline: keep the previous suggestions.
-      }
+      } catch {}
     }, 180);
 
     return () => {
@@ -102,7 +94,7 @@ export function AirportPicker({
         aria-expanded={open}
         aria-controls={listId}
         aria-autocomplete="list"
-        placeholder={placeholder ?? 'Ville, aéroport ou code IATA'}
+        placeholder={placeholder ?? 'City, airport or IATA code'}
         value={query}
         onChange={(event) => {
           setQuery(event.target.value);

@@ -1,21 +1,21 @@
 import 'server-only';
-import type { ClientSession, Document } from 'mongodb';
+import { randomInt } from 'node:crypto';
+import type { ClientSession } from 'mongoose';
 import {
   AS_ENTITY,
-  type Doc,
-  auditLogsCol,
-  bookingsCol,
-  flightsCol,
   fromDoc,
   fromDocs,
   literal,
   nextId,
   now,
-  passengersCol,
-  paymentsCol,
-  usersCol,
+  pipeline,
   withTransaction,
-} from '../mongodb';
+  type Doc,
+  type Stage,
+} from '../db';
+import { AuditLogModel, UserModel } from '../models/users';
+import { FlightModel } from '../models/flights';
+import { BookingModel, PassengerModel, PaymentModel } from '../models/bookings';
 import { computeQuote, refundRate, round, seatLabel, type PassengerMix } from '../pricing';
 import { getFlight } from './flights';
 import type {
@@ -55,19 +55,18 @@ export interface BookingRequest {
 export class BookingError extends Error {}
 
 const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+const REFERENCE_LENGTH = 8;
 
-/** Six-character booking reference, unique across the bookings collection. */
 async function generateReference(session?: ClientSession): Promise<string> {
-  const bookings = await bookingsCol();
   for (let attempt = 0; attempt < 50; attempt++) {
     let reference = '';
-    for (let i = 0; i < 6; i++) {
-      reference += ALPHABET[Math.floor(Math.random() * ALPHABET.length)];
+    for (let i = 0; i < REFERENCE_LENGTH; i++) {
+      reference += ALPHABET[randomInt(ALPHABET.length)];
     }
-    const taken = await bookings.findOne({ reference }, { projection: { _id: 1 }, session });
+    const taken = await BookingModel.findOne({ reference }, { _id: 1 }).session(session ?? null).lean();
     if (!taken) return reference;
   }
-  throw new BookingError('Impossible de générer une référence de réservation. Réessayez.');
+  throw new BookingError('Could not generate a booking reference. Please try again.');
 }
 
 function mixOf(passengers: PassengerInput[]): PassengerMix {
@@ -78,28 +77,21 @@ function mixOf(passengers: PassengerInput[]): PassengerMix {
   };
 }
 
-/**
- * Seat labels already held on a flight by bookings that are still active, for
- * the given cabin. Cancelled bookings release their seats, so their labels are
- * free to hand out again.
- */
 async function occupiedSeats(
   flightId: number,
   cabin: CabinClass,
   session?: ClientSession,
 ): Promise<Set<string>> {
-  const [bookings, passengers] = await Promise.all([bookingsCol(), passengersCol()]);
-
-  const holders = await bookings
-    .find(
-      {
-        $or: [{ outbound_flight_id: flightId }, { return_flight_id: flightId }],
-        cabin_class: cabin,
-        status: { $ne: 'cancelled' },
-      },
-      { projection: { outbound_flight_id: 1, return_flight_id: 1 }, session },
-    )
-    .toArray();
+  const holders = await BookingModel.find(
+    {
+      $or: [{ outbound_flight_id: flightId }, { return_flight_id: flightId }],
+      cabin_class: cabin,
+      status: { $ne: 'cancelled' },
+    },
+    { outbound_flight_id: 1, return_flight_id: 1 },
+  )
+    .session(session ?? null)
+    .lean<{ _id: number; outbound_flight_id: number; return_flight_id: number | null }[]>();
 
   const outbound = new Set(
     holders.filter((b) => b.outbound_flight_id === flightId).map((b) => b._id),
@@ -107,9 +99,9 @@ async function occupiedSeats(
   const inbound = new Set(holders.filter((b) => b.return_flight_id === flightId).map((b) => b._id));
   if (outbound.size === 0 && inbound.size === 0) return new Set();
 
-  const rows = await passengers
-    .find({ booking_id: { $in: [...new Set([...outbound, ...inbound])] } }, { session })
-    .toArray();
+  const rows = await PassengerModel.find({ booking_id: { $in: [...new Set([...outbound, ...inbound])] } })
+    .session(session ?? null)
+    .lean<{ booking_id: number; seat_outbound: string | null; seat_return: string | null }[]>();
 
   const seats = new Set<string>();
   for (const row of rows) {
@@ -119,51 +111,40 @@ async function occupiedSeats(
   return seats;
 }
 
-/**
- * Create a booking: validates availability, prices the trip, assigns seats,
- * records the payment and decrements the remaining seats.
- *
- * On a replica set the whole sequence runs in one transaction. On a standalone
- * `mongod`, which has no transactions, every write pushes its own undo onto
- * `rollback` and a failure replays them in reverse — so a half-written booking
- * never survives, and a sold-out flight is never oversold either way: the seat
- * decrement is a single conditional update that only applies while the seats
- * are actually there.
- */
 export async function createBooking(
   request: BookingRequest,
 ): Promise<{ reference: string; total: number }> {
   const mix = mixOf(request.passengers);
   if (mix.adult < 1) {
-    throw new BookingError('Au moins un passager adulte est requis.');
+    throw new BookingError('At least one adult passenger is required.');
   }
   if (mix.infant > mix.adult) {
     throw new BookingError(
-      "Chaque bébé doit voyager avec un adulte : il ne peut pas y avoir plus de bébés que d'adultes.",
+      'Each infant must travel with an adult: there cannot be more infants than adults.',
     );
   }
 
   const outbound = await getFlight(request.outboundFlightId);
-  if (!outbound) throw new BookingError("Le vol aller sélectionné n'existe plus.");
+  if (!outbound) throw new BookingError('The selected outbound flight no longer exists.');
 
   const returnFlight = request.returnFlightId
     ? ((await getFlight(request.returnFlightId)) ?? null)
     : null;
   if (request.returnFlightId && !returnFlight) {
-    throw new BookingError("Le vol retour sélectionné n'existe plus.");
+    throw new BookingError('The selected return flight no longer exists.');
   }
   if (returnFlight) {
     if (returnFlight.id === outbound.id) {
-      throw new BookingError('Le vol retour doit être différent du vol aller.');
+      throw new BookingError('The return flight must be different from the outbound flight.');
     }
     if (
       returnFlight.origin_id !== outbound.destination_id ||
       returnFlight.destination_id !== outbound.origin_id
     ) {
-      throw new BookingError("Le vol retour ne correspond pas à l'itinéraire aller.");
+      throw new BookingError('The return flight does not match the outbound itinerary.');
     }
     if (returnFlight.departure_utc <= outbound.departure_utc) {
-      throw new BookingError('Le vol retour doit partir après le vol aller.');
+      throw new BookingError('The return flight must depart after the outbound flight.');
     }
   }
 
@@ -172,15 +153,6 @@ export async function createBooking(
   const seatField = `seats_${request.cabin}`;
 
   return withTransaction(async (session) => {
-    const [flights, bookings, passengersCollection, payments, auditLogs] = await Promise.all([
-      flightsCol(),
-      bookingsCol(),
-      passengersCol(),
-      paymentsCol(),
-      auditLogsCol(),
-    ]);
-
-    // Only used when the server has no transactions to roll back for us.
     const rollback: (() => Promise<unknown>)[] = [];
     const undo = async () => {
       if (session) return;
@@ -193,47 +165,39 @@ export async function createBooking(
       const taken: Record<number, Set<string>> = {};
 
       for (const flightId of segments) {
-        const state = await flights.findOne(
-          { _id: flightId },
-          { projection: { [seatField]: 1, status: 1, departure_utc: 1 }, session },
-        );
-        if (!state) throw new BookingError('Vol introuvable.');
+        const state = await FlightModel.findOne({ _id: flightId }, { [seatField]: 1, status: 1 })
+          .session(session ?? null)
+          .lean<{ status: string } & Record<string, number>>();
+        if (!state) throw new BookingError('Flight not found.');
         if (state.status === 'cancelled') {
-          throw new BookingError('Ce vol a été annulé par la compagnie.');
+          throw new BookingError('This flight was cancelled by the airline.');
         }
         if (state.status === 'departed' || state.status === 'landed') {
-          throw new BookingError("Ce vol est déjà parti : la réservation n'est plus possible.");
+          throw new BookingError('This flight has already departed, so it can no longer be booked.');
         }
 
-        const available = (state as unknown as Record<string, number>)[seatField];
+        const available = state[seatField];
         if (available < quote.seats) {
           throw new BookingError(
-            `Il ne reste que ${available} place(s) dans cette cabine pour l'un des vols sélectionnés.`,
+            `Only ${available} seat(s) left in this cabin on one of the selected flights.`,
           );
         }
         taken[flightId] = await occupiedSeats(flightId, request.cabin, session);
       }
 
-      // Hold the seats before writing anything else: the `$gte` guard makes the
-      // check and the decrement one atomic step, so two concurrent bookings for
-      // the last seat cannot both succeed.
       for (const flightId of segments) {
-        const held = await flights.updateOne(
+        const held = await FlightModel.updateOne(
           { _id: flightId, [seatField]: { $gte: quote.seats } },
           { $inc: { [seatField]: -quote.seats } },
-          { session },
-        );
+        ).session(session ?? null);
         if (held.modifiedCount !== 1) {
           throw new BookingError(
-            "Les dernières places de cette cabine viennent d'être vendues. Relancez une recherche.",
+            'The last seats in this cabin have just been sold. Please search again.',
           );
         }
-        rollback.push(() =>
-          flights.updateOne({ _id: flightId }, { $inc: { [seatField]: quote.seats } }),
-        );
+        rollback.push(() => FlightModel.updateOne({ _id: flightId }, { $inc: { [seatField]: quote.seats } }));
       }
 
-      /** Lowest seat label on this flight that no active booking holds. */
       const nextSeat = (flightId: number): string => {
         const held = taken[flightId];
         for (let index = 0; index < 1000; index++) {
@@ -243,37 +207,32 @@ export async function createBooking(
             return label;
           }
         }
-        throw new BookingError('Plus aucun siège attribuable dans cette cabine.');
+        throw new BookingError('No seat left to allocate in this cabin.');
       };
 
       const reference = await generateReference(session);
-      const bookingId = await nextId('bookings', 1, session);
-
-      await bookings.insertOne(
-        {
-          _id: bookingId,
-          reference,
-          user_id: request.userId,
-          outbound_flight_id: request.outboundFlightId,
-          return_flight_id: request.returnFlightId,
-          cabin_class: request.cabin,
-          passenger_count: request.passengers.length,
-          base_price: quote.base,
-          taxes: quote.taxes,
-          total_price: quote.total,
-          currency: 'EUR',
-          status: 'confirmed',
-          contact_email: request.contactEmail,
-          contact_phone: request.contactPhone,
-          created_at: now(),
-          cancelled_at: null,
-        },
-        { session },
-      );
-      rollback.push(() => bookings.deleteOne({ _id: bookingId }));
+      const bookingDoc = new BookingModel({
+        reference,
+        user_id: request.userId,
+        outbound_flight_id: request.outboundFlightId,
+        return_flight_id: request.returnFlightId,
+        cabin_class: request.cabin,
+        passenger_count: request.passengers.length,
+        base_price: quote.base,
+        taxes: quote.taxes,
+        total_price: quote.total,
+        currency: 'EUR',
+        status: 'confirmed',
+        contact_email: request.contactEmail,
+        contact_phone: request.contactPhone,
+        created_at: now(),
+        cancelled_at: null,
+      });
+      await bookingDoc.save({ session });
+      const bookingId = bookingDoc._id;
+      rollback.push(() => BookingModel.deleteOne({ _id: bookingId }));
 
       const documents = request.passengers.map((passenger) => {
-        // Infants travel on an adult's lap and are not given their own seat.
         const takesSeat = passenger.passenger_type !== 'infant';
         return {
           booking_id: bookingId,
@@ -284,40 +243,34 @@ export async function createBooking(
       });
 
       const firstPassengerId = await nextId('passengers', documents.length, session);
-      await passengersCollection.insertMany(
+      await PassengerModel.insertMany(
         documents.map((document, index) => ({ _id: firstPassengerId + index, ...document })),
         { session },
       );
-      rollback.push(() => passengersCollection.deleteMany({ booking_id: bookingId }));
+      rollback.push(() => PassengerModel.deleteMany({ booking_id: bookingId }));
 
-      await payments.insertOne(
-        {
-          _id: await nextId('payments', 1, session),
-          booking_id: bookingId,
-          amount: quote.total,
-          currency: 'EUR',
-          method: request.paymentMethod,
-          status: 'paid',
-          card_last4: request.cardLast4,
-          transaction_ref: `TX-${reference}-${Date.now().toString(36).toUpperCase()}`,
-          created_at: now(),
-        },
-        { session },
-      );
-      rollback.push(() => payments.deleteMany({ booking_id: bookingId }));
+      const paymentDoc = new PaymentModel({
+        booking_id: bookingId,
+        amount: quote.total,
+        currency: 'EUR',
+        method: request.paymentMethod,
+        status: 'paid',
+        card_last4: request.cardLast4,
+        transaction_ref: `TX-${reference}-${Date.now().toString(36).toUpperCase()}`,
+        created_at: now(),
+      });
+      await paymentDoc.save({ session });
+      rollback.push(() => PaymentModel.deleteMany({ booking_id: bookingId }));
 
-      await auditLogs.insertOne(
-        {
-          _id: await nextId('audit_logs', 1, session),
-          user_id: request.userId,
-          action: 'booking.create',
-          entity: 'booking',
-          entity_id: String(bookingId),
-          details: `${outbound.origin_iata} → ${outbound.destination_iata}${returnFlight ? ' (aller-retour)' : ''}, ${request.passengers.length} passager(s)`,
-          created_at: now(),
-        },
-        { session },
-      );
+      const logDoc = new AuditLogModel({
+        user_id: request.userId,
+        action: 'booking.create',
+        entity: 'booking',
+        entity_id: String(bookingId),
+        details: `${outbound.origin_iata} → ${outbound.destination_iata}${returnFlight ? ' (aller-retour)' : ''}, ${request.passengers.length} passager(s)`,
+        created_at: now(),
+      });
+      await logDoc.save({ session });
 
       return { reference, total: quote.total };
     } catch (error) {
@@ -331,15 +284,9 @@ async function hydrate(booking: Booking): Promise<BookingDetail | undefined> {
   const outbound = await getFlight(booking.outbound_flight_id);
   if (!outbound) return undefined;
 
-  const [passengersCollection, payments, users] = await Promise.all([
-    passengersCol(),
-    paymentsCol(),
-    usersCol(),
-  ]);
-
   const [passengerRows, paymentRows, customer, returnFlight] = await Promise.all([
-    passengersCollection
-      .aggregate<Passenger & { nationality: string }>([
+    PassengerModel.aggregate<Passenger & { nationality: string }>(
+      pipeline([
         { $match: { booking_id: booking.id } },
         { $sort: { _id: 1 } },
         {
@@ -353,24 +300,21 @@ async function hydrate(booking: Booking): Promise<BookingDetail | undefined> {
         { $set: { nationality: { $ifNull: [{ $first: '$country.name' }, ''] } } },
         { $unset: 'country' },
         ...AS_ENTITY,
-      ])
-      .toArray(),
-    payments.find({ booking_id: booking.id }).sort({ _id: 1 }).toArray(),
-    users.findOne(
+      ]),
+    ),
+    PaymentModel.find({ booking_id: booking.id }).sort({ _id: 1 }).lean<Doc<Payment>[]>(),
+    UserModel.findOne(
       { _id: booking.user_id },
       {
-        // Same columns the SQL version selected: never the password hash.
-        projection: {
-          email: 1,
-          first_name: 1,
-          last_name: 1,
-          phone: 1,
-          role: 1,
-          status: 1,
-          created_at: 1,
-        },
+        email: 1,
+        first_name: 1,
+        last_name: 1,
+        phone: 1,
+        role: 1,
+        status: 1,
+        created_at: 1,
       },
-    ),
+    ).lean<Doc<PublicUser> | null>(),
     booking.return_flight_id ? getFlight(booking.return_flight_id) : Promise.resolve(undefined),
   ]);
 
@@ -380,19 +324,17 @@ async function hydrate(booking: Booking): Promise<BookingDetail | undefined> {
     returnFlight: returnFlight ?? null,
     passengers: passengerRows,
     payments: fromDocs<Payment>(paymentRows),
-    customer: fromDoc<PublicUser>(customer as unknown as Doc<PublicUser> | null)!,
+    customer: fromDoc<PublicUser>(customer)!,
   };
 }
 
 export async function getBookingByReference(reference: string): Promise<BookingDetail | undefined> {
-  const bookings = await bookingsCol();
-  const booking = fromDoc<Booking>(await bookings.findOne({ reference }));
+  const booking = fromDoc<Booking>(await BookingModel.findOne({ reference }).lean<Doc<Booking> | null>());
   return booking ? hydrate(booking) : undefined;
 }
 
 export async function getBookingById(id: number): Promise<BookingDetail | undefined> {
-  const bookings = await bookingsCol();
-  const booking = fromDoc<Booking>(await bookings.findOne({ _id: id }));
+  const booking = fromDoc<Booking>(await BookingModel.findOne({ _id: id }).lean<Doc<Booking> | null>());
   return booking ? hydrate(booking) : undefined;
 }
 
@@ -409,8 +351,7 @@ export interface BookingSummary extends Booking {
   customer_email: string;
 }
 
-/** The outbound flight, its airline, both airports and the customer. */
-const SUMMARY_JOINS: Document[] = [
+const SUMMARY_JOINS: Stage[] = [
   { $lookup: { from: 'flights', localField: 'outbound_flight_id', foreignField: '_id', as: 'f' } },
   { $unwind: '$f' },
   { $lookup: { from: 'airlines', localField: 'f.airline_id', foreignField: '_id', as: 'al' } },
@@ -423,7 +364,7 @@ const SUMMARY_JOINS: Document[] = [
   { $unwind: '$u' },
 ];
 
-const SUMMARY_SHAPE: Document[] = [
+const SUMMARY_SHAPE: Stage[] = [
   {
     $set: {
       origin_iata: '$o.iata',
@@ -442,11 +383,10 @@ const SUMMARY_SHAPE: Document[] = [
   ...AS_ENTITY,
 ];
 
-async function summaries(stages: Document[], tail: Document[] = []): Promise<BookingSummary[]> {
-  const bookings = await bookingsCol();
-  return bookings
-    .aggregate<BookingSummary>([...stages, ...SUMMARY_JOINS, ...tail, ...SUMMARY_SHAPE])
-    .toArray();
+async function summaries(stages: Stage[], tail: Stage[] = []): Promise<BookingSummary[]> {
+  return BookingModel.aggregate<BookingSummary>(
+    pipeline([...stages, ...SUMMARY_JOINS, ...tail, ...SUMMARY_SHAPE]),
+  );
 }
 
 export async function listUserBookings(userId: number): Promise<BookingSummary[]> {
@@ -463,11 +403,10 @@ export interface BookingFilter {
 export async function listBookings(
   filter: BookingFilter,
 ): Promise<{ rows: BookingSummary[]; total: number }> {
-  const match: Document = {};
+  const match: Stage = {};
   if (filter.status) match.status = filter.status;
 
-  // Searches span the joined flight and customer, so it runs after the lookups.
-  const search: Document[] = [];
+  const search: Stage[] = [];
   if (filter.search) {
     const like = literal(filter.search);
     search.push({
@@ -482,13 +421,11 @@ export async function listBookings(
     });
   }
 
-  const perPage = filter.perPage ?? 25;
-  const page = Math.max(1, filter.page ?? 1);
+  const perPage = Math.min(Math.max(1, Math.trunc(filter.perPage ?? 25)), 100);
+  const page = Math.min(Math.max(1, Math.trunc(filter.page ?? 1)), 10_000);
 
-  // `$facet` counts and paginates off the same joined set, in one round trip.
-  const bookings = await bookingsCol();
-  const [result] = await bookings
-    .aggregate<{ total: { n: number }[]; rows: BookingSummary[] }>([
+  const [result] = await BookingModel.aggregate<{ total: { n: number }[]; rows: BookingSummary[] }>(
+    pipeline([
       { $match: match },
       ...SUMMARY_JOINS,
       ...search,
@@ -503,8 +440,8 @@ export async function listBookings(
           ],
         },
       },
-    ])
-    .toArray();
+    ]),
+  );
 
   return { rows: result?.rows ?? [], total: result?.total[0]?.n ?? 0 };
 }
@@ -514,112 +451,79 @@ export interface CancellationResult {
   rate: number;
 }
 
-/**
- * Cancel a booking, release its seats and register the refund due under the
- * cancellation policy. `actorId` is the user performing the cancellation.
- */
 export async function cancelBooking(
   bookingId: number,
   actorId: number,
 ): Promise<CancellationResult> {
   return withTransaction(async (session) => {
-    const [bookings, flights, passengers, payments, auditLogs] = await Promise.all([
-      bookingsCol(),
-      flightsCol(),
-      passengersCol(),
-      paymentsCol(),
-      auditLogsCol(),
-    ]);
-
-    const booking = await bookings.findOne({ _id: bookingId }, { session });
-    if (!booking) throw new BookingError('Réservation introuvable.');
-    if (booking.status === 'cancelled') throw new BookingError('Cette réservation est déjà annulée.');
+    const booking = await BookingModel.findOne({ _id: bookingId }).session(session ?? null).lean<
+      Doc<Booking>
+    >();
+    if (!booking) throw new BookingError('Booking not found.');
+    if (booking.status === 'cancelled') throw new BookingError('This booking is already cancelled.');
     if (booking.status === 'completed') {
-      throw new BookingError('Un voyage déjà effectué ne peut pas être annulé.');
+      throw new BookingError('A trip that has already been taken cannot be cancelled.');
     }
 
-    const outbound = await flights.findOne(
+    const outbound = await FlightModel.findOne(
       { _id: booking.outbound_flight_id },
-      { projection: { departure_utc: 1 }, session },
-    );
+      { departure_utc: 1 },
+    )
+      .session(session ?? null)
+      .lean<{ departure_utc: string } | null>();
     const rate = outbound ? refundRate(outbound.departure_utc) : 0;
     const refund = round(booking.total_price * rate);
 
-    const seats = await passengers.countDocuments(
-      { booking_id: bookingId, passenger_type: { $ne: 'infant' } },
-      { session },
-    );
+    const seats = await PassengerModel.countDocuments({
+      booking_id: bookingId,
+      passenger_type: { $ne: 'infant' },
+    }).session(session ?? null);
 
     const flightIds = [booking.outbound_flight_id, booking.return_flight_id].filter(
       (id): id is number => typeof id === 'number',
     );
     const seatField = `seats_${booking.cabin_class}`;
     if (seats > 0 && flightIds.length > 0) {
-      await flights.updateMany(
-        { _id: { $in: flightIds } },
-        { $inc: { [seatField]: seats } },
-        { session },
+      await FlightModel.updateMany({ _id: { $in: flightIds } }, { $inc: { [seatField]: seats } }).session(
+        session ?? null,
       );
     }
 
-    await bookings.updateOne(
+    await BookingModel.updateOne(
       { _id: bookingId },
       { $set: { status: 'cancelled', cancelled_at: now() } },
-      { session },
-    );
+    ).session(session ?? null);
 
     if (refund > 0) {
-      await payments.insertOne(
-        {
-          _id: await nextId('payments', 1, session),
-          booking_id: bookingId,
-          amount: -refund,
-          currency: 'EUR',
-          method: 'card',
-          status: 'refunded',
-          card_last4: null,
-          transaction_ref: `RF-${booking.reference}-${Date.now().toString(36).toUpperCase()}`,
-          created_at: now(),
-        },
-        { session },
-      );
+      const refundDoc = new PaymentModel({
+        booking_id: bookingId,
+        amount: -refund,
+        currency: 'EUR',
+        method: 'card',
+        status: 'refunded',
+        card_last4: null,
+        transaction_ref: `RF-${booking.reference}-${Date.now().toString(36).toUpperCase()}`,
+        created_at: now(),
+      });
+      await refundDoc.save({ session });
     }
 
-    await auditLogs.insertOne(
-      {
-        _id: await nextId('audit_logs', 1, session),
-        user_id: actorId,
-        action: 'booking.cancel',
-        entity: 'booking',
-        entity_id: String(bookingId),
-        details: `Annulation de ${booking.reference} — remboursement ${refund.toFixed(2)} € (${Math.round(rate * 100)} %)`,
-        created_at: now(),
-      },
-      { session },
-    );
+    const logDoc = new AuditLogModel({
+      user_id: actorId,
+      action: 'booking.cancel',
+      entity: 'booking',
+      entity_id: String(bookingId),
+      details: `Annulation de ${booking.reference} — remboursement ${refund.toFixed(2)} € (${Math.round(rate * 100)} %)`,
+      created_at: now(),
+    });
+    await logDoc.save({ session });
 
     return { refund, rate };
   });
 }
 
-/** Move a booking to another status from the administration area. */
-export async function setBookingStatus(
-  bookingId: number,
-  status: BookingStatus,
-  actorId: number,
-): Promise<void> {
-  const [bookings, auditLogs] = await Promise.all([bookingsCol(), auditLogsCol()]);
-
-  await bookings.updateOne({ _id: bookingId }, { $set: { status } });
-  await auditLogs.insertOne({
-    _id: await nextId('audit_logs'),
-    user_id: actorId,
-    action: 'booking.status',
-    entity: 'booking',
-    entity_id: String(bookingId),
-    details: `Statut passé à ${status}`,
-    created_at: now(),
-  });
+export async function setBookingStatus(bookingId: number, status: BookingStatus): Promise<void> {
+  await BookingModel.updateOne({ _id: bookingId }, { $set: { status } });
 }
 
 export interface DashboardStats {
@@ -635,21 +539,15 @@ export interface DashboardStats {
 }
 
 export async function dashboardStats(): Promise<DashboardStats> {
-  const [bookingsCollection, usersCollection, flightsCollection] = await Promise.all([
-    bookingsCol(),
-    usersCol(),
-    flightsCol(),
-  ]);
-
   const [[totals], users, flights, upcomingFlights] = await Promise.all([
-    bookingsCollection
-      .aggregate<{
-        all: { n: number }[];
-        confirmed: { n: number }[];
-        cancelled: { n: number }[];
-        earned: { total: number }[];
-        travellers: { n: number }[];
-      }>([
+    BookingModel.aggregate<{
+      all: { n: number }[];
+      confirmed: { n: number }[];
+      cancelled: { n: number }[];
+      earned: { total: number }[];
+      travellers: { n: number }[];
+    }>(
+      pipeline([
         {
           $facet: {
             all: [{ $count: 'n' }],
@@ -659,21 +557,17 @@ export async function dashboardStats(): Promise<DashboardStats> {
               { $match: { status: { $in: ['confirmed', 'completed'] } } },
               { $group: { _id: null, total: { $sum: '$total_price' } } },
             ],
-            // A booking owns exactly `passenger_count` passenger documents, so
-            // summing the field avoids walking the passengers collection.
             travellers: [
               { $match: { status: { $ne: 'cancelled' } } },
               { $group: { _id: null, n: { $sum: '$passenger_count' } } },
             ],
           },
         },
-      ])
-      .toArray(),
-    usersCollection.countDocuments(),
-    // 50 000+ documents, and the figure is only ever displayed: the metadata
-    // count is instant where an exact count would scan the whole index.
-    flightsCollection.estimatedDocumentCount(),
-    flightsCollection.countDocuments({ departure_utc: { $gt: now() }, status: 'scheduled' }),
+      ]),
+    ),
+    UserModel.countDocuments(),
+    FlightModel.estimatedDocumentCount(),
+    FlightModel.countDocuments({ departure_utc: { $gt: now() }, status: 'scheduled' }),
   ]);
 
   const confirmed = totals?.confirmed[0]?.n ?? 0;
@@ -695,9 +589,8 @@ export async function dashboardStats(): Promise<DashboardStats> {
 export async function revenueByMonth(
   months = 6,
 ): Promise<{ month: string; total: number; bookings: number }[]> {
-  const bookings = await bookingsCol();
-  const rows = await bookings
-    .aggregate<{ _id: string; total: number; bookings: number }>([
+  const rows = await BookingModel.aggregate<{ _id: string; total: number; bookings: number }>(
+    pipeline([
       { $match: { status: { $in: ['confirmed', 'completed'] } } },
       {
         $group: {
@@ -708,8 +601,8 @@ export async function revenueByMonth(
       },
       { $sort: { _id: -1 } },
       { $limit: months },
-    ])
-    .toArray();
+    ]),
+  );
 
   return rows.map(({ _id, ...rest }) => ({ month: _id, ...rest }));
 }
@@ -717,13 +610,10 @@ export async function revenueByMonth(
 export async function topRoutes(
   limit = 6,
 ): Promise<{ route: string; bookings: number; revenue: number }[]> {
-  const bookings = await bookingsCol();
-  const rows = await bookings
-    .aggregate<{ _id: string; bookings: number; revenue: number }>([
+  const rows = await BookingModel.aggregate<{ _id: string; bookings: number; revenue: number }>(
+    pipeline([
       { $match: { status: { $ne: 'cancelled' } } },
-      {
-        $lookup: { from: 'flights', localField: 'outbound_flight_id', foreignField: '_id', as: 'f' },
-      },
+      { $lookup: { from: 'flights', localField: 'outbound_flight_id', foreignField: '_id', as: 'f' } },
       { $unwind: '$f' },
       { $lookup: { from: 'airports', localField: 'f.origin_id', foreignField: '_id', as: 'o' } },
       { $lookup: { from: 'airports', localField: 'f.destination_id', foreignField: '_id', as: 'd' } },
@@ -738,8 +628,8 @@ export async function topRoutes(
       },
       { $sort: { bookings: -1, revenue: -1 } },
       { $limit: limit },
-    ])
-    .toArray();
+    ]),
+  );
 
   return rows.map(({ _id, ...rest }) => ({ route: _id, ...rest }));
 }

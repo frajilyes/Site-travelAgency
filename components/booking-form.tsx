@@ -8,16 +8,16 @@ import type { ActionState } from '@/lib/validation';
 import type { CabinClass, Country, PassengerType, PublicUser } from '@/lib/types';
 
 const TYPE_LABELS: Record<PassengerType, string> = {
-  adult: 'Adulte (12 ans et plus)',
-  child: 'Enfant (2 à 11 ans)',
-  infant: 'Bébé (moins de 2 ans)',
+  adult: 'Adult (12 and over)',
+  child: 'Child (2 to 11)',
+  infant: 'Infant (under 2)',
 };
 
 function SubmitButton({ total }: { total: string }) {
   const { pending } = useFormStatus();
   return (
     <button type="submit" className="btn btn-primary w-full" disabled={pending}>
-      {pending ? 'Paiement en cours…' : `Payer ${total} et confirmer`}
+      {pending ? 'Processing payment…' : `Pay ${total} and confirm`}
     </button>
   );
 }
@@ -68,23 +68,23 @@ export function BookingForm({
       ) : null}
 
       <section className="card p-5">
-        <h2 className="text-lg font-semibold">Passagers</h2>
+        <h2 className="text-lg font-semibold">Passengers</h2>
         <p className="mt-1 text-sm text-ink-muted">
-          Saisissez les noms exactement comme sur le passeport de chaque voyageur.
+          Enter each traveller’s name exactly as it appears on their passport.
         </p>
 
         <div className="mt-4 space-y-5">
           {rows.map((type, index) => (
             <fieldset key={index} className="rounded-xl border border-line p-4">
               <legend className="px-2 text-sm font-semibold">
-                Passager {index + 1} — {TYPE_LABELS[type]}
+                Passenger {index + 1} — {TYPE_LABELS[type]}
               </legend>
               <input type="hidden" name="passenger_type" value={type} />
 
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 <div>
                   <label className="label" htmlFor={`first-${index}`}>
-                    Prénom
+                    First name
                   </label>
                   <input
                     id={`first-${index}`}
@@ -99,7 +99,7 @@ export function BookingForm({
 
                 <div>
                   <label className="label" htmlFor={`last-${index}`}>
-                    Nom
+                    Last name
                   </label>
                   <input
                     id={`last-${index}`}
@@ -114,19 +114,19 @@ export function BookingForm({
 
                 <div>
                   <label className="label" htmlFor={`gender-${index}`}>
-                    Civilité
+                    Gender
                   </label>
                   <select id={`gender-${index}`} className="field" name="gender" defaultValue="M">
-                    <option value="M">Masculin</option>
-                    <option value="F">Féminin</option>
-                    <option value="X">Non spécifié</option>
+                    <option value="M">Male</option>
+                    <option value="F">Female</option>
+                    <option value="X">Unspecified</option>
                   </select>
                   <FieldError messages={errors[`passenger.${index}.gender`]} />
                 </div>
 
                 <div>
                   <label className="label" htmlFor={`dob-${index}`}>
-                    Date de naissance
+                    Date of birth
                   </label>
                   <input
                     id={`dob-${index}`}
@@ -142,7 +142,7 @@ export function BookingForm({
 
                 <div>
                   <label className="label" htmlFor={`nationality-${index}`}>
-                    Nationalité
+                    Nationality
                   </label>
                   <select
                     id={`nationality-${index}`}
@@ -152,7 +152,7 @@ export function BookingForm({
                     required
                   >
                     <option value="" disabled>
-                      Choisir un pays
+                      Choose a country
                     </option>
                     {countries.map((country) => (
                       <option key={country.id} value={country.id}>
@@ -165,7 +165,7 @@ export function BookingForm({
 
                 <div>
                   <label className="label" htmlFor={`passport-${index}`}>
-                    Numéro de passeport
+                    Passport number
                   </label>
                   <input
                     id={`passport-${index}`}
@@ -180,7 +180,7 @@ export function BookingForm({
 
                 <div>
                   <label className="label" htmlFor={`expiry-${index}`}>
-                    Passeport valable jusqu’au
+                    Passport valid until
                   </label>
                   <input
                     id={`expiry-${index}`}
@@ -199,15 +199,15 @@ export function BookingForm({
       </section>
 
       <section className="card p-5">
-        <h2 className="text-lg font-semibold">Coordonnées de contact</h2>
+        <h2 className="text-lg font-semibold">Contact details</h2>
         <p className="mt-1 text-sm text-ink-muted">
-          La confirmation et les éventuels changements d’horaire y seront envoyés.
+          The confirmation and any schedule changes will be sent here.
         </p>
 
         <div className="mt-4 grid gap-4 sm:grid-cols-2">
           <div>
             <label className="label" htmlFor="contact_email">
-              Adresse e-mail
+              Email address
             </label>
             <input
               id="contact_email"
@@ -221,7 +221,7 @@ export function BookingForm({
           </div>
           <div>
             <label className="label" htmlFor="contact_phone">
-              Téléphone
+              Phone
             </label>
             <input
               id="contact_phone"
@@ -237,14 +237,14 @@ export function BookingForm({
       </section>
 
       <section className="card p-5">
-        <h2 className="text-lg font-semibold">Paiement</h2>
+        <h2 className="text-lg font-semibold">Payment</h2>
 
         <div className="mt-4 grid gap-3 sm:grid-cols-3">
           {(
             [
-              ['card', 'Carte bancaire'],
+              ['card', 'Credit or debit card'],
               ['paypal', 'PayPal'],
-              ['bank_transfer', 'Virement bancaire'],
+              ['bank_transfer', 'Bank transfer'],
             ] as const
           ).map(([value, label]) => (
             <label
@@ -269,14 +269,14 @@ export function BookingForm({
           <div className="mt-4 grid gap-4 sm:grid-cols-2">
             <div className="sm:col-span-2">
               <label className="label" htmlFor="card_holder">
-                Titulaire de la carte
+                Cardholder name
               </label>
               <input id="card_holder" className="field" name="card_holder" autoComplete="cc-name" />
               <FieldError messages={errors.card_holder} />
             </div>
             <div className="sm:col-span-2">
               <label className="label" htmlFor="card_number">
-                Numéro de carte
+                Card number
               </label>
               <input
                 id="card_number"
@@ -290,7 +290,7 @@ export function BookingForm({
             </div>
             <div>
               <label className="label" htmlFor="card_expiry">
-                Expiration (MM/AA)
+                Expiry (MM/YY)
               </label>
               <input
                 id="card_expiry"
@@ -303,7 +303,7 @@ export function BookingForm({
             </div>
             <div>
               <label className="label" htmlFor="card_cvc">
-                Cryptogramme
+                Security code
               </label>
               <input
                 id="card_cvc"
@@ -316,15 +316,15 @@ export function BookingForm({
               <FieldError messages={errors.card_cvc} />
             </div>
             <p className="text-xs text-ink-muted sm:col-span-2">
-              Démonstration : aucun paiement réel n’est effectué. Le numéro doit simplement passer la
-              validation de Luhn, par exemple 4242 4242 4242 4242.
+              Demonstration only: no real payment is taken. The number just has to pass the Luhn
+              check — for example 4242 4242 4242 4242.
             </p>
           </div>
         ) : (
           <p className="mt-4 text-sm text-ink-muted">
             {method === 'paypal'
-              ? 'Vous serez redirigé vers PayPal après la confirmation (simulé dans cette démonstration).'
-              : 'Les coordonnées bancaires vous seront envoyées par e-mail. La réservation est maintenue 48 heures.'}
+              ? 'You will be redirected to PayPal after confirming (simulated in this demonstration).'
+              : 'Our bank details will be emailed to you. The booking is held for 48 hours.'}
           </p>
         )}
       </section>
@@ -333,8 +333,8 @@ export function BookingForm({
         <label className="flex items-start gap-3 text-sm">
           <input type="checkbox" name="accept_terms" className="mt-1" />
           <span>
-            J’accepte les conditions de vente, la politique d’annulation et je certifie que les
-            informations des passagers correspondent à leurs documents de voyage.
+            I accept the terms of sale and the cancellation policy, and I confirm that the passenger
+            details match their travel documents.
           </span>
         </label>
         <FieldError messages={errors.accept_terms} />

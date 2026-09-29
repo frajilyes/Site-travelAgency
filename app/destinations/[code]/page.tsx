@@ -10,11 +10,11 @@ export async function generateMetadata(
 ): Promise<Metadata> {
   const { code } = await props.params;
   const country = await getCountryByCode(code);
-  if (!country) return { title: 'Destination inconnue' };
+  if (!country) return { title: 'Unknown destination' };
 
   return {
-    title: `Vols vers ${country.name}`,
-    description: `Aéroports, formalités d’entrée et meilleurs tarifs pour voyager vers ${country.name}.`,
+    title: `Flights to ${country.name}`,
+    description: `Airports, entry requirements and the best fares for travelling to ${country.name}.`,
   };
 }
 
@@ -41,21 +41,20 @@ export default async function CountryPage(props: PageProps<'/destinations/[code]
 
       <h1 className="mt-2 text-3xl font-bold tracking-tight">{country.name}</h1>
       <p className="mt-1 text-sm text-ink-muted">
-        {country.continent} · {airports.length} aéroport{airports.length > 1 ? 's' : ''} desservi
-        {airports.length > 1 ? 's' : ''}
+        {country.continent} · {airports.length} airport{airports.length > 1 ? 's' : ''} served
       </p>
 
       <section className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <div className="card p-4">
-          <p className="text-xs font-semibold uppercase tracking-wide text-ink-muted">Code pays</p>
+          <p className="text-xs font-semibold uppercase tracking-wide text-ink-muted">Country code</p>
           <p className="mt-1 text-lg font-bold">{country.code}</p>
         </div>
         <div className="card p-4">
-          <p className="text-xs font-semibold uppercase tracking-wide text-ink-muted">Monnaie</p>
+          <p className="text-xs font-semibold uppercase tracking-wide text-ink-muted">Currency</p>
           <p className="mt-1 text-lg font-bold">{country.currency}</p>
         </div>
         <div className="card p-4">
-          <p className="text-xs font-semibold uppercase tracking-wide text-ink-muted">Indicatif</p>
+          <p className="text-xs font-semibold uppercase tracking-wide text-ink-muted">Dialling code</p>
           <p className="mt-1 text-lg font-bold">{country.phone_code}</p>
         </div>
         <div className="card p-4">
@@ -67,27 +66,27 @@ export default async function CountryPage(props: PageProps<'/destinations/[code]
       {country.visa_note ? (
         <section className="card mt-4 p-5">
           <h2 className="text-sm font-semibold uppercase tracking-wide text-ink-muted">
-            Formalités d’entrée
+            Entry requirements
           </h2>
           <p className="mt-2 text-sm">{country.visa_note}</p>
           <p className="mt-2 text-xs text-ink-muted">
-            Information donnée à titre indicatif pour un voyageur au départ de France. Vérifiez les
-            règles applicables à votre nationalité avant le départ.
+            Given as a guide for a traveller departing from France. Check the rules that apply to
+            your own nationality before you travel.
           </p>
         </section>
       ) : null}
 
       <section className="mt-8">
-        <h2 className="text-lg font-semibold">Aéroports desservis</h2>
+        <h2 className="text-lg font-semibold">Airports served</h2>
         <div className="table-wrap mt-4">
           <table className="table">
             <thead>
               <tr>
                 <th>IATA</th>
-                <th>Aéroport</th>
-                <th>Ville</th>
-                <th>Fuseau horaire</th>
-                <th>Coordonnées</th>
+                <th>Airport</th>
+                <th>City</th>
+                <th>Timezone</th>
+                <th>Coordinates</th>
               </tr>
             </thead>
             <tbody>
@@ -109,18 +108,18 @@ export default async function CountryPage(props: PageProps<'/destinations/[code]
 
       {fares.length > 0 ? (
         <section className="mt-8">
-          <h2 className="text-lg font-semibold">Meilleurs tarifs au départ de Paris (CDG)</h2>
+          <h2 className="text-lg font-semibold">Best fares departing from Paris (CDG)</h2>
           <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {fares.map((fare) => (
               <Link
                 key={fare.airport_id}
-                href={`/vols?from=CDG&to=${fare.iata}&date=${today()}&cabine=economy&adultes=1&enfants=0&bebes=0`}
+                href={`/flights?from=CDG&to=${fare.iata}&date=${today()}&cabin=economy&adults=1&children=0&infants=0`}
                 className="card p-4 transition-colors hover:border-brand-400"
               >
                 <p className="font-semibold">{fare.city}</p>
                 <p className="font-mono text-xs text-ink-muted">CDG → {fare.iata}</p>
                 <p className="mt-3 text-sm text-ink-muted">
-                  dès <span className="text-base font-bold text-ink">{formatPrice(fare.price)}</span>
+                  from <span className="text-base font-bold text-ink">{formatPrice(fare.price)}</span>
                 </p>
               </Link>
             ))}
@@ -130,11 +129,11 @@ export default async function CountryPage(props: PageProps<'/destinations/[code]
 
       {airlines.length > 0 ? (
         <section className="mt-8">
-          <h2 className="text-lg font-semibold">Compagnies desservant {country.name}</h2>
+          <h2 className="text-lg font-semibold">Airlines serving {country.name}</h2>
           <div className="mt-3 flex flex-wrap gap-2">
             {airlines.map((airline) => (
               <span key={airline.iata} className="badge">
-                {airline.name} · {airline.flights} vols
+                {airline.name} · {airline.flights} flights
               </span>
             ))}
           </div>
